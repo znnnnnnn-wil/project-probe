@@ -1,0 +1,178 @@
+# 支付宝接入、配置与验收
+
+## 2026-10-12 订单有效期与自动取消（当前行为）
+
+- `ORDER_TTL_MINUTES=30`：服务端创建订单时保存 `expires_at` 快照，允许 1—1440 分钟。重复创建请求及重新获取支付表单均不延长本地期限，表单的 `timeout_express` 使用剩余分钟。V4 给历史订单补充“创建时间 + 30 分钟”，不重写金额、付款或权益。
+- 当前支付账号范围内的未付款订单到期变为 `EXPIRED`，禁止获取付款表单、禁止模拟付款；订单页每 15 秒刷新。服务端每分钟处理最多 100 个本地过期订单，访问订单时也检查期限。
+- `PAYMENT_EXPIRY_SYNC_ENABLED=true` 启用过期查询及必要关单；模板默认 false，当前公网沙箱已启用。每轮最多 10 个订单，查询租约防止重复操作。仅在验签查询确认 `WAIT_BUYER_PAY` 后请求支付宝关单；只有官方关闭结果才保存 `CLOSED`。
+- 查询已付款则按原机制发放一次权益；查询失败保留 `EXPIRED/QUERY_FAILED` 并重试，页面允许本人查询。`NOT_CREATED` 表示支付宝尚未创建交易，停止后台轮询，仍支持手动查询及有效迟到通知。订单过期并不是现金退款，也不等同于平台已经关单。
+- 旧付款链接可能产生迟到付款：合法通知仍可结算 `EXPIRED` 订单，严格保留验签、应用、卖家、交易号、金额及幂等校验。已付款订单不被本地超时取消。现金退款接口仍默认关闭，过期关单不要求开启现金退款开关。
+
+本次公网三笔截图旧订单已为 `EXPIRED/NOT_CREATED`，付款入口隐藏；本人已付订单仍为 `PAID`，训练包及 GRANTED 各 1 个。真实沙箱 `WAIT_BUYER_PAY → 关单` 尚未执行；该路径仅用模拟 SDK 验证。生产未验证。后文较早阶段的 mock、未付款与自动关单未实现描述属于历史记录，以本节和 VERIFICATION.md 最新记录为准。
+
+核对日期：2026-10-10；运行状态更新于 2026-10-12。采用 AI 网页应用基础收款路径，自建订单与训练权益。本地配置保留；当前公网为 **demo/sandbox**，已确认一次本人沙箱付款及通知。正式签约与生产付款未验证。
+
+## 官方依据与尚未确认的条件
+
+- [最新接入指南](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/ai-web-app-payment-integration-guide.html)：页面支付、服务端查询与异步通知；不能根据前端返回认定付款。文档描述个人收款场景，不能据此认定当前个人账号已经具备生产收款资格。
+- [页面支付 API](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/api-list/alipay-trade-page-pay.html)：`alipay.trade.page.pay` / `FAST_INSTANT_TRADE_PAY`。本项目使用官方 Java SDK 在服务端生成签名 POST 表单；生成表单不等于支付成功。商户订单号限字母、数字和下划线，新订单采用环境前缀与无连字符 UUID，内部记录 ID 保持不变。
+- [交易查询 API](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/api-list/alipay-trade-query.html)：通过同一应用签名查询商户订单。SDK `execute` 校验同步响应签名。协议不保证返回 `app_id` 或 `seller_id`，不能编造这些响应字段。
+- [通知验签说明](https://aipay.alipay.com/docs/vibe-pay/ai-web-app-payment-qianyi/api-list/async-notify-verify.html)：RSA2 验签后核对应用、卖家、订单、金额、交易状态；成功处理返回纯文本 `success`，失败返回 `failure`。`TRADE_CLOSED` 也可能表示已付款交易全额退款，不能一概认作未支付。
+- [支付宝沙箱说明](https://s.apifox.cn/apidoc/docs-site/3618910/doc-3283556)：使用独立沙箱应用和账户。固定沙箱网关 `https://openapi-sandbox.dl.alipaydev.com/gateway.do`；正式网关 `https://openapi.alipay.com/gateway.do`，不接受自定义网关或自动切换。
+
+当前账号的资质、应用所属卖家、产品授权、签约审核、费率、限额、域名要求和参赛审核均待本人确认。电脑网页支付适配已实现；响应式页面不代表手机支付宝 H5 支付产品已接入。本文不把本地测试写成平台审核或官方付款成功。
+
+## 三种模式和账号隔离
+
+| 模式 | 行为 | 当前验证边界 |
+| --- | --- | --- |
+| mock | 无支付宝调用；页面明确显示开发模拟，允许主动模拟成功 | 本地、隔离部署测试 |
+| sandbox | 独立沙箱账号及密钥，固定沙箱网关 | 代码与本地合成签名测试；官方付款未联调 |
+| production | 独立正式账号及密钥，固定正式网关，页面提示真实扣款，无模拟入口 | 实现与合成测试；生产资质和真实收款未验证 |
+
+缺少配置时可启动查看说明、订单，但不能支付、查询或处理付款通知，绝不回退 mock。新配置启用后必须创建新订单，配置缺失时创建的订单不可挪到另一个账号结算。
+
+订单不可变快照包含 `mode/app_id/seller_id/account_scope/merchant_order_no/amount_cents`。环境和应用账号必须与当前服务配置一致；旧订单仅可查看，不能跨账号支付、查询、发放或消费权益。权益通过原订单关联隔离，训练读取、开始与返还仍有服务端权限和事务校验。沙箱与正式 APP_ID 不能相同；私钥分目录保管。建议生产使用独立服务实例、配置文件及 PostgreSQL 数据库，不将沙箱数据导入生产。
+
+V2 迁移只加字段，不重写历史订单金额、状态、交易号或已用权益；原 mock 订单以 `legacy` 标记兼容。原沙箱订单缺少可审计账号快照，不能自动结算，请保留原环境备份并人工核对，不通过 SQL 改成生产订单。
+
+## 本机密钥与平台配置
+
+已经提供并执行：
+
+```powershell
+node scripts/prepare-alipay.mjs --mode=sandbox
+node scripts/prepare-alipay.mjs --mode=production
+```
+
+分别生成 `.secrets/alipay/sandbox` 与 `production` 中的 RSA 2048 / PKCS8 私钥、应用公钥和 `payment.env` 草稿。目录在 `.gitignore` 中；Windows 去除继承权限并仅授权当前用户，Unix 新建目录 0700、文件 0600。已有完整密钥对不会覆盖；不完整时拒绝生成。运行脚本不会上传、签约、修改根目录 `.env` 或切换支付模式。
+
+1. 本人进入[支付宝开放平台](https://open.alipay.com/)，打开官方沙箱应用。登录、扫码、验证码由本人完成。
+2. 在对应应用的接口加签设置选择 RSA2 / 公钥方式，将 **application-public-upload.txt** 内容填为应用公钥。只上传公钥，**application-private.pem 永不上传、不发聊天、不进入浏览器**。若现有应用已绑定其他密钥，先确认原应用用途，不擅自替换线上密钥。
+3. 将官方返回的 **支付宝公钥** 保存为同目录 `alipay-public.pem`，不是应用公钥，也不是沙箱公钥拿去正式环境。支持 PEM 或单行 Base64。服务器会拒绝把应用公钥误填为支付宝公钥；格式检查不能证明平台绑定成功。
+4. 提供对应环境 APP_ID、卖家 UID / seller_id、已配置 HTTPS 的公网来源即可用脚本填写草稿，不需要手动拼接多个 URL：
+
+```powershell
+node scripts/configure-alipay.mjs --mode=sandbox --app-id=平台提供的数字ID --seller-id=平台提供的数字UID --public-base-url=https://你的域名
+# 本人确认 APP_ID 属于这个 seller_id 后，才设置：
+node scripts/configure-alipay.mjs --mode=sandbox --merchant-confirmed=true
+```
+
+生产改用 `--mode=production`，进入本人正式应用，独立配置；`MERCHANT_CONFIRMED=true` 仅是人工归属确认，不等于平台授权或签约通过。不要把任何私钥放进命令参数。
+
+准确待填字段（前缀分别为 `ALIPAY_SANDBOX_` / `ALIPAY_PRODUCTION_`）：
+
+| 后缀 | 来源 / 含义 |
+| --- | --- |
+| APP_ID | 对应环境官方应用 ID |
+| SELLER_ID | 此应用收款卖家的支付宝 UID，不能填买家账号 |
+| PRIVATE_KEY_FILE | 已生成本机 `application-private.pem` 绝对路径；草稿已填 |
+| PUBLIC_KEY_FILE | 官方支付宝公钥 `alipay-public.pem` 路径；草稿已填，文件待保存 |
+| NOTIFY_URL | `https://公网域名/api/payments/notify`，不能带登录、重定向或验证码 |
+| RETURN_URL | `https://公网域名/payment-return`；本地沙箱前端可为 `http://localhost:5175/payment-return` |
+| MERCHANT_CONFIRMED | 本人核对应用与卖家匹配后设 true |
+
+沙箱还需本人保留沙箱买家账号用于沙箱付款。正式环境还需本人完成适用产品和协议流程；代码不会替用户签署或开通。现有根目录 `.env` 不变，旧的通用 `ALIPAY_*` 配置不再作为真实支付配置来源，避免不同环境共享密钥。
+
+## 独立沙箱启动与回调部署
+
+### 官方配置块本机导入
+
+将官方完整环境变量配置块仅保存到 `.secrets/alipay/sandbox/platform-config.env`，不要放入聊天、源码或命令行。只包含注释和 AIPAY_* 环境变量，不包含后续 Markdown 或 Java 示例。运行 `node scripts/import-alipay-sandbox.mjs`：使用 AIPAY_PRIVATE_KEY（Java PKCS8）、AIPAY_PUBLIC_KEY（应用公钥，核对私钥）、AIPAY_ALIPAY_PUBLIC_KEY（支付宝公钥，SDK 验签）及 AIPAY_APP_ID。两个公钥不能混用。导入创建独立密钥版本，不覆盖原密钥；仅更新沙箱草稿并重置人工归属确认，当前 mock 服务不变。
+
+导入仅证明格式和公私钥匹配，不证明平台绑定、卖家归属或支付能力。卖家 UID、公网回调及人工确认仍按上节补齐。已通过聊天或截图暴露的应用私钥应由本人在官方平台更换，更新后的完整配置只保存在本机。若复制结果混入示例代码、缺字段或密钥错配，导入拒绝且错误不输出密钥。程序合成验证命令为 `node --test scripts/import-alipay-sandbox.test.mjs`。
+
+先构建后端，随后在根目录运行：
+
+```powershell
+node scripts/start-payment-sandbox.mjs
+# 另一个终端，仅设置测试前端代理：
+$env:PROBE_API_TARGET='http://127.0.0.1:18084'
+cd frontend
+npm.cmd run dev -- --port 5175
+```
+
+访问 `http://localhost:5175`。脚本只读独立沙箱草稿，固定演示模型、18084 端口、独立 `.runtime/payment-sandbox/database`，不读取根目录 `.env`，不使用原用户库。缺少账号、公钥或 HTTPS 通知时页面显示具体缺项，不能付款。首次沙箱返回地址应填写 `http://localhost:5175/payment-return`。后端正在运行时不要重建被占用的 JAR。
+
+本机地址不能直接供支付宝访问。需要已有公网 HTTPS 服务或本人授权的转发入口；仓库不购买服务、不自动建立公开隧道。部署模板见 `deploy/nginx-https.conf.example` 和 `nginx-internal-https.conf.example`：外层 TLS 入口反代 Compose 本机 8088，内层仅信任经确认的外层 TCP 来源 IP，用 `real_ip` 恢复访客来源，再向后端写入单值 `X-Probe-Client-IP`。不能无条件信任外部 X-Forwarded-For。默认内层配置没有启用此额外信任，直接复制外层模板而不设置内层可信 IP 会导致访客共享代理限流。
+
+独立本机沙箱若由公网 HTTPS 入口代理 5175，则设置 `SANDBOX_APP_ORIGIN=https://你的域名`、`SANDBOX_SECURE_COOKIE=true` 后启动后端，并将返回地址同样设为公网域名。同源登录与返回页必须经过同一入口；没有域名和证书时只能完成本地准备。
+
+Compose 部署选择一个环境目录挂载：`ALIPAY_KEY_DIRECTORY=./.secrets/alipay/sandbox`，容器中的 PRIVATE_KEY_FILE 为 `/run/secrets/alipay/application-private.pem`，PUBLIC_KEY_FILE 为 `/run/secrets/alipay/alipay-public.pem`。正式目录用 production。不得把两个环境目录一起挂入服务器；默认 mock 挂载空目录。为沙箱和正式部署分别使用 `docker compose -p 独立项目名 --env-file 独立配置文件 ...`，配置 APP_ENV_FILE 指向该环境，避免共用数据库卷和根目录私有配置。启用生产需要本人明确授权和完成平台条件，当前不会执行。
+
+## 金额、确认与补偿
+
+`TRAINING_PRICE_CENTS` 为服务端商品定价（整数分，1–100000000）；990 只是配置示例。新订单保存价格快照，调价不影响旧订单。浏览器只提交幂等 requestKey，不接受客户端金额。支付请求、通知及查询均对照原订单金额，不再各处写死 9.90。
+
+通知必须 RSA2 验签、拒绝重复表单字段，再校验 app_id、seller_id、商户订单号、交易号、金额和状态。只有 TRADE_SUCCESS / TRADE_FINISHED 允许在锁与事务中把 PENDING 变为 PAID，同时唯一创建权益包和 GRANTED 流水。重复通知或通知与查询并发仅发一次。验签使用参数副本，不记录完整通知、密钥或 SDK 交易正文。
+
+主动查询使用同一环境、应用签名与固定网关，SDK 校验响应签名，核对 out_trade_no / trade_no / total_amount / trade_status。**查询协议不保证返回卖家 ID**：交易归属依赖官方应用账号绑定及订单账号快照，配置要求本人核对 APP_ID 与 seller_id。响应额外出现 app_id、seller_id 或 seller_user_id 时必须匹配。不能声称已对协议未提供的卖家字段独立验签核对。
+
+| 服务端状态 | 展示 / 权益 |
+| --- | --- |
+| PENDING / NOT_QUERIED | 等待确认，不发放 |
+| WAIT_BUYER_PAY | 等待买家付款，不发放 |
+| NOT_CREATED | 支付宝尚未创建交易，可发起支付后查询 |
+| QUERY_FAILED | 未确认，保留订单，可重试；失败查询不能发权益 |
+| PAID | 已确认并幂等发放 |
+| CLOSED | 未付款交易关闭，无权益，无继续付款入口 |
+| REVIEW_REQUIRED | 已付款交易后来关闭/退款，保留历史流水，暂停剩余权益，人工复核 |
+| REFUNDING | 已保留唯一退款请求号并暂停权益；超时或请求受理不表示退款完成 |
+| CASH_REFUNDED | 退款查询明确确认完成；保留原付款与权益流水，不恢复使用 |
+
+返回 `/payment-return?probe_order=内部订单ID` 仅查本人的服务端订单，必要时主动查询；trade_status、out_trade_no、金额等跳转参数不用于发放。未携带有效订单 ID 显示返回订单页入口；未登录先登录。官方技能将 AI 网页应用收款定义为覆盖电脑及手机浏览器/H5；本项目实际手机支付链路仍未验证。
+
+## 官方 Skill 接入补充（2026-10-11）
+
+通过用户指定的 `npx -y @alipay/alipay-aipay@latest install` 安装 Codex 技能（安装器 1.7.3，技能 1.7.0）。Windows 原生环境可以进行代码集成；官方技能的 Windows 入驻分支转交官方平台页面办理，不能据此宣称签约成功。
+
+下单使用 SDK `pageExecute(request, "POST")`。服务端校验表单 action 属于当前环境固定官方网关；浏览器在惰性 DOM 中解析，只复制唯一 POST 表单的隐藏字段，再新建表单提交。不会插入或执行 SDK 返回的脚本、事件属性。商户金额、订单号、应用及签名来自服务端订单。
+
+新增接口默认由 `PAYMENT_OPERATIONS_ENABLED=false` 禁用，mock 下始终拒绝；不自动调用、不定时退款，当前页面没有现金退款按钮。仅在本人确认退款规则并启用后，已登录订单所有者可通过受保护 API 操作：
+
+| POST 路径 | 规则 |
+| --- | --- |
+| `/api/orders/{id}/close` | 先查询确认 WAIT_BUYER_PAY，才能请求关闭；查询已付或未知时拒绝关闭 |
+| `/api/orders/{id}/cash-refund` | 仅已付且深挖和复测均未使用的训练包，全额退款；首次事务内冻结权益并保存唯一请求号 |
+| `/api/orders/{id}/refund-query` | 使用原订单及退款号，校验交易、原金额及退款金额，仅 REFUND_SUCCESS 确认完成 |
+
+请求超时保留 REFUNDING 与原请求号、金额、原因，重试不能创建另一笔退款；退款重试和查询至少间隔 10 秒。仅请求受理或 fund_change=N 不算成功。本实现保守地统一通过退款查询确认，即使 fund_change=Y 也不立即宣称完成。V3 新增退款账本及通知事件账本，不重写旧订单。退款/分账类通知不再作为普通付款通知发放权益；未能自动归类处理时进入人工复核。迟到的付款通知不会恢复已退权益。
+
+以上接口仅在合成 SDK 测试验证。部分退款、已使用包现金退款、争议处理、平台账单对账与运营后台仍未实现；训练故障返还次数不是现金退款。
+
+订单页与返回页都可主动补偿查询。可选 `PAYMENT_RECONCILE_ENABLED=true`：每分钟最多 10 个、仅当前账号、已生成跳转且创建后 24 小时内的 PENDING 订单，至少间隔 60 秒；数据库查询租约避免多进程同订单重复查询。对租约冲突显示稍后刷新；错误保留脱敏原因，下轮可重试。超过 24 小时仍可本人手动查询。该功能不是完整财务对账、现金退款或平台自动关单；不能仅凭时间或浏览器取消伪造 CLOSED。
+
+订单过期后由独立开关 `PAYMENT_EXPIRY_SYNC_ENABLED=true` 控制查询及待付款关单。已生成付款表单的 EXPIRED 订单若查询返回 NOT_CREATED，每小时仍会重查一次；该响应只证明当次查询不存在交易，不作为永久终态。其他待确认的过期订单至少间隔 60 秒，每轮合计最多 10 个，不限定创建后 24 小时。未生成表单且已查询 NOT_CREATED 的订单不重复查询。过期返回页的“重新查询订单状态”同样会调用官方查询，合法迟到付款通过已有幂等发放流程确认。
+
+## 官方沙箱验收流程（一次本人付款已确认，其他项按验证记录）
+
+1. 本人完成沙箱账号、公钥绑定、支付宝公钥保存、应用卖家归属确认，配置真实可达的 HTTPS 回调。页面应标官方沙箱且无配置缺项。使用独立库创建 **新订单**，记录脱敏商户订单号与服务端金额。
+2. 点击前往官方沙箱，核对固定沙箱域名及金额。本人用沙箱买家付款，不能使用真实买家资金。生成 URL 不作为通过证据。
+3. 回调验签与全部校验后，订单 PAID，权益 1 深挖 + 1 复测。通知响应须是纯文本 success，数据库只出现一个包和一次 GRANTED。
+4. 通知丢失测试在专用沙箱部署暂阻回调（不能影响生产）。付款后保持 PENDING，再通过订单页查询或定时补偿确认；恢复回调后确认仍只发一次。不能修改数据库伪造付款。
+5. 在官方支持的通知重发方式或已留存的有效沙箱通知基础上重送同一通知，查询同时运行也不得多发权益。不得使用私钥伪造官方签名冒充沙箱证据。
+6. 验证未付款 WAIT_BUYER_PAY、尚未建单、官方关闭、查询网络失败与重试；错误应用、卖家、金额、签名、交易号必须拒绝。保留脱敏验证结果，不保留账号口令和完整通知日志。
+7. 再走一次训练与复测，核对权益消费、刷新恢复和系统故障规则。记录完成时间、所用环境、实际回调/查询结果；未执行项保持待验证。
+
+## 当前限制与故障排查
+
+- 配置缺项：查看训练包页面的具体缺项。密钥有效不代表平台绑定成功；应用公钥与支付宝公钥不可混用。检查文件仅服务端可读，不输出内容。
+- 官方查询失败：检查环境、APP_ID、对应支付宝公钥、产品权限与网络。接口不存在交易不等于付款成功；query_error 为脱敏提示，不将平台正文写日志。
+- 付款后未到账：先查状态，不新建或手工发权益；检查公网回调 HTTPS、精确路径、未被登录/重定向/WAF 阻断，以及返回纯文本。重复通知正确处理不会多发。
+- HTTPS 入口需正确传递可靠客户端 IP，否则认证额度可能共享；多实例认证限流仍需共享入口限流，不能把现有单 JVM 计数当成全局限制。
+- 已实现默认禁用的全额现金退款及未付款关单接口，尚无真实平台验证、部分退款、完整日账单对账、自动关单、生产告警与人工处理后台。外部退款通知进入复核，不自动退钱或再次发权益。生产上线前需补齐服务条款、隐私与退款规则、数据备份、运维责任和平台资质验证。
+- 本轮官方浏览器工具初始化失败，未代操作控制台；本机准备、代码和自动测试独立完成。登录、实名认证、协议、产品开通及任何真实付款由本人操作。
+
+## 2026-10-11 当前沙箱入口与下一步
+
+**2026-10-12 更新：** 本人已完成一次沙箱付款。服务器确认 13:54:56 收到 TRADE_SUCCESS 通知，990 分订单 PAID，训练包 1 个、GRANTED 1 条，深挖与复测均未用。收银台已能完成本人这次付款；未自动返回项目页面的原因尚未核实。此前 404 是历史状态。已付主动补偿、真实通知重发与生产验证仍待完成，详细证据见 VERIFICATION.md。
+
+**2026-10-11 历史故障：** 本人实际点击沙箱返回 /standard/auth.htm 404，曾复现；扫码参数替代也未得到付款页面。2026-10-12 已有本人成功付款及通知确认记录，历史故障说明见 SANDBOX_CASHIER_INCIDENT.md。以下配置和准备检查描述保留为当时记录，以本节更新及 VERIFICATION.md 的最新记录为准。
+
+服务器已启用 **https://39.96.27.134**，配置 sandbox，模型仍为明确标识的 demo。本机原支付模式保留。本人提供的沙箱配置已安全导入并传入服务端，应用公钥只用于核对私钥，验签使用独立的支付宝公钥。通知 `https://39.96.27.134/api/payments/notify`；返回 `https://39.96.27.134/payment-return`。IP 证书已签发，自动续期演练通过，运维与依赖见 SERVER_DEPLOYMENT.md。
+
+服务端新订单、价格快照、签名 POST 表单和无模拟付款入口检查通过。实际查询官方网关得到交易尚未创建，订单仍待付；尚未收到官方成功通知，尚未验证付款后到账。配置完整与未付款查询成功不代表正式产品权限、签约或沙箱付款验收成功。
+
+本人下一步：在本应用注册或登录 → 训练包与订单 → 创建新沙箱订单 → 前往官方沙箱 → 使用官方沙箱 App 的买家账号付款。不能使用卖家账号或普通支付宝真实资金代替。本人付款后，再核验订单 PAID、验签通知、一次 GRANTED 与一个训练包，并执行已付查询补偿与重复通知验收。不要手工修改数据库模拟付款，不将返回页参数作为到账证据。
+
+2026-10-11 的配置为 `PAYMENT_OPERATIONS_ENABLED=false`、`PAYMENT_RECONCILE_ENABLED=false`，订单页可手动查询。2026-10-12 已确认一次沙箱付款，并启用独立的过期查询/关单开关；现金退款仍未启用，生产实际收款仍待验证。此次代码优化尚未发布到服务器。

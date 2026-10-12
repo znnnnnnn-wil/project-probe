@@ -1,0 +1,11 @@
+CREATE TABLE app_users (id VARCHAR(36) PRIMARY KEY, username VARCHAR(80) NOT NULL UNIQUE, password_hash VARCHAR(100) NOT NULL, created_at BIGINT NOT NULL);
+CREATE TABLE auth_sessions (token_hash VARCHAR(64) PRIMARY KEY, user_id VARCHAR(36) NOT NULL REFERENCES app_users(id), expires_at BIGINT NOT NULL);
+CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL REFERENCES app_users(id), body TEXT NOT NULL, version INTEGER NOT NULL, updated_at BIGINT NOT NULL);
+CREATE TABLE project_revisions (project_id VARCHAR(36) NOT NULL REFERENCES projects(id), version INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(project_id, version));
+CREATE TABLE purchase_orders (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL REFERENCES app_users(id), request_key VARCHAR(100) NOT NULL, amount_cents INTEGER NOT NULL CHECK(amount_cents > 0), mode VARCHAR(20) NOT NULL, status VARCHAR(20) NOT NULL, trade_no VARCHAR(100) UNIQUE, created_at BIGINT NOT NULL, UNIQUE(user_id, request_key));
+CREATE TABLE training_packages (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL REFERENCES app_users(id), order_id VARCHAR(36) NOT NULL UNIQUE REFERENCES purchase_orders(id), deep_used BOOLEAN NOT NULL DEFAULT FALSE, retest_used BOOLEAN NOT NULL DEFAULT FALSE, deep_training_id VARCHAR(36));
+CREATE TABLE trainings (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL REFERENCES app_users(id), project_id VARCHAR(36) NOT NULL REFERENCES projects(id), package_id VARCHAR(36) NOT NULL REFERENCES training_packages(id), request_key VARCHAR(100) NOT NULL, kind VARCHAR(20) NOT NULL, parent_id VARCHAR(36), status VARCHAR(30) NOT NULL, body TEXT NOT NULL, lease_until BIGINT NOT NULL DEFAULT 0, generation_token VARCHAR(36), created_at BIGINT NOT NULL, UNIQUE(user_id, request_key));
+CREATE TABLE entitlement_events (id VARCHAR(36) PRIMARY KEY, package_id VARCHAR(36) NOT NULL REFERENCES training_packages(id), training_id VARCHAR(36), event_type VARCHAR(20) NOT NULL, created_at BIGINT NOT NULL, UNIQUE(training_id, event_type));
+CREATE INDEX projects_owner ON projects(user_id);
+CREATE INDEX trainings_owner ON trainings(user_id);
+CREATE INDEX orders_owner ON purchase_orders(user_id);
