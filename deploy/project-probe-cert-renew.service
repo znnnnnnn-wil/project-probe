@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew Project Probe IP certificate and reload HTTPS
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=/opt/project-probe-staging/certificates/renewal/project-probe-ip.conf
+
+[Service]
+Type=oneshot
+ExecStart=/opt/project-probe-staging/certbot-venv/bin/certbot renew --config-dir /opt/project-probe-staging/certificates --work-dir /opt/project-probe-staging/acme-work --logs-dir /opt/project-probe-staging/acme-logs --deploy-hook /opt/project-probe-staging/reload-https.sh --quiet
+TimeoutStartSec=300
+UMask=0077

@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: projectprobe
+      POSTGRES_USER: projectprobe
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请先在 .env 配置数据库密码}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U projectprobe -d projectprobe"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  backend:
+    build: ./backend
+    volumes:
+      - ${ALIPAY_KEY_DIRECTORY:-./.secrets/alipay/mock}:/run/secrets/alipay:ro
+    env_file: ${APP_ENV_FILE:-.env}
+    environment:
+      BIND_ADDRESS: 0.0.0.0
+      PORT: 8080
+      DB_URL: jdbc:postgresql://db:5432/projectprobe
+      DB_USER: projectprobe
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      TRUSTED_PROXY_ADDRESSES: ${PROXY_NETWORK_PREFIX:-172.30.88}.10
+    networks:
+      - default
+      - app_proxy
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  web:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8088}:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      app_proxy:
+        ipv4_address: ${PROXY_NETWORK_PREFIX:-172.30.88}.10
+networks:
+  app_proxy:
+    ipam:
+      config:
+        - subnet: ${PROXY_NETWORK_PREFIX:-172.30.88}.0/24
+volumes:
+  postgres_data:

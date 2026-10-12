@@ -1,0 +1,21 @@
+# 可审查的宿主机 TLS 入口模板；替换域名和证书路径后 nginx -t。
+# Compose web 保持仅本机 8088，不暴露后端或数据库。
+server {
+    listen 443 ssl;
+    server_name probe.example.com;
+    ssl_certificate /etc/letsencrypt/live/probe.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/probe.example.com/privkey.pem;
+    client_max_body_size 200k;
+    location / {
+        proxy_pass http://127.0.0.1:8088;
+        proxy_set_header Host $host;
+        # 内部 Nginx 只信任此 TCP 来源，并通过 real_ip 配置获取客户端。
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Real-IP "";
+        proxy_set_header X-Probe-Client-IP "";
+        proxy_read_timeout 100s;
+    }
+}
+# 付款回调务必直接使用 https://probe.example.com/api/payments/notify。
+# 不依赖 HTTP 重定向、登录或验证码页面；返回页 /payment-return 属于前端 SPA。
