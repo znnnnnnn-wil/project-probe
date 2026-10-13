@@ -1,5 +1,15 @@
 # 百炼模型配置与联调状态
 
+## 2026-10-13 线上模型更新
+
+线上已启用 `deepseek-v4.1-flash`，使用 `https://dashscope.aliyuncs.com/compatible-mode/v1`。用户当日截图显示该模型有 1M 免费额度且“用完即停”开启。服务器配置为 `MODEL_MODE=live`、`MODEL_FREE_QUOTA_ONLY=true`，确认模型字段与所选模型一致；额度错误停止请求，不自动切换模型。截图不等于平台实时额度或账单查询。
+
+用户提出的候选 `glm-5.3` 无法关闭思考模式。小型 JSON 探测通过，但业务事实提取在当前 2200 输出 token 上限处截断，因此本次选择同时拥有免费额度的 DeepSeek。官方参数说明：[GLM](https://help.aliyun.com/en/model-studio/glm)、[DeepSeek](https://help.aliyun.com/en/model-studio/deepseek-api)。
+
+隔离验收：`live-model-1791864897062` 的提取、两次追问和复盘成功，复测首题未通过严格校验；`live-model-1791864987790` 恢复首题，但暴露验收脚本未继续回答的遗漏；修复脚本后 `live-model-1791865060526` 完成原训练的复测并记录 PASSED。三个记录的成功模型响应合计 26218 tokens，不含探测、公网验证及 GLM 请求，不能据此推算实时剩余额度。
+
+公网验证记录 `.runtime/server-live-model-20261013.json` 为 PASSED，实际提取出 6 条有效引用的 AI 候选事实。服务器沿用现有后端程序，API Key 仅保存在服务器 0600 配置中。下文为 2026-10-10 的本机 Qwen 配置与历史记录，本次没有修改本机 `.env`。
+
 更新时间：2026-10-10。密钥仅存于本地忽略文件 `.env` 的 MODEL_API_KEY，前端、源码、文档与日志均不包含密钥。密钥已在聊天提供，建议在控制台轮换后更新本地配置。
 
 ## 当前选择
