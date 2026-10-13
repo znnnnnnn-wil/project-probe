@@ -2,7 +2,18 @@ import { test, expect, type Page } from "@playwright/test";
 import { paymentUrl } from "../src/payment";
 
 const id = "11111111-1111-4111-8111-111111111111";
-async function fixture(page: Page, mode: string, configured = true) {
+async function fixture(
+  page: Page,
+  mode: string,
+  configured = true,
+  operationsEnabled = false,
+) {
+  const packages: {
+    id: string;
+    order_id: string;
+    deep_used: boolean;
+    retest_used: boolean;
+  }[] = [];
   const order = {
     id,
     mode,
@@ -33,6 +44,7 @@ async function fixture(page: Page, mode: string, configured = true) {
       json = {
         mode,
         configured,
+        operationsEnabled,
         configurationIssues: configured
           ? []
           : ["APP_ID 未填写", "支付宝公钥缺失"],
@@ -42,7 +54,7 @@ async function fixture(page: Page, mode: string, configured = true) {
           description: "合成商品",
         },
         orders: [order],
-        packages: [],
+        packages,
       };
     else if (path.endsWith("/checkout")) json = { formHtml };
     else if (path.endsWith("/sync")) {
@@ -62,6 +74,7 @@ async function fixture(page: Page, mode: string, configured = true) {
   return {
     order,
     calls,
+    packages,
     fail: (value: boolean) => {
       queryFails = value;
     },
@@ -70,6 +83,57 @@ async function fixture(page: Page, mode: string, configured = true) {
     },
   };
 }
+
+test("关单入口遵守服务端开关，并在确认后才发送请求", async ({ page }) => {
+  const f = await fixture(page, "sandbox", true, true);
+  await page.route(`**/api/orders/${id}/close`, async (route) => {
+    f.calls.push("POST /api/orders/" + id + "/close");
+    f.order.status = "CLOSED";
+    await route.fulfill({ json: f.order });
+  });
+  await page.goto("/#/shop");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "关闭未付款订单" }).click();
+  expect(f.calls.some((call) => call.endsWith("/close"))).toBe(false);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "关闭未付款订单" }).click();
+  await expect(page.getByText("交易已关闭，未发放权益")).toBeVisible();
+  expect(f.calls.filter((call) => call.endsWith("/close"))).toHaveLength(1);
+});
+
+test("未使用训练包退款需确认，结果未明时保留查询入口", async ({ page }) => {
+  const f = await fixture(page, "sandbox", true, true);
+  f.order.status = "PAID";
+  f.packages.push({
+    id: "synthetic-package",
+    order_id: id,
+    deep_used: false,
+    retest_used: false,
+  });
+  await page.route(`**/api/orders/${id}/cash-refund`, async (route) => {
+    f.calls.push("POST /api/orders/" + id + "/cash-refund");
+    f.order.status = "REFUNDING";
+    await route.fulfill({ json: f.order });
+  });
+  await page.route(`**/api/orders/${id}/refund-query`, async (route) => {
+    f.calls.push("POST /api/orders/" + id + "/refund-query");
+    f.order.status = "CASH_REFUNDED";
+    await route.fulfill({ json: f.order });
+  });
+  await page.goto("/#/shop");
+  page.once("dialog", (dialog) => dialog.dismiss());
+  await page.getByRole("button", { name: "申请未使用训练包退款" }).click();
+  expect(f.calls.some((call) => call.endsWith("/cash-refund"))).toBe(false);
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "申请未使用训练包退款" }).click();
+  await expect(
+    page.getByText("退款处理中或待确认，剩余权益已暂停"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "查询退款状态" }).click();
+  await expect(
+    page.getByText("现金退款已确认，训练包不可继续使用"),
+  ).toBeVisible();
+});
 
 for (const mode of ["sandbox", "production"]) {
   test(`${mode} 商品、服务端价格与跳转白名单`, async ({ page }) => {
