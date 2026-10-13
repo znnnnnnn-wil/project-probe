@@ -123,6 +123,9 @@ public class PaymentService {
   Map<String, Object> create(String user, Map<String, Object> input) {
     return s.locked(user, () -> {
       String key = required(input, "requestKey", 100);
+      String productCode = input.containsKey("productCode") ? required(input, "productCode", 30) : "TEN_TRAININGS";
+      var product = products().stream().filter(p -> productCode.equals(p.get("code"))).findFirst()
+        .orElseThrow(() -> error(400, "套餐不存在，请刷新后重新选择"));
       var rows = s.db.queryForList(
         "SELECT * FROM purchase_orders WHERE user_id=? AND request_key=?",
         user,
@@ -130,24 +133,26 @@ public class PaymentService {
       );
       if (!rows.isEmpty()) {
         requireScope(rows.get(0));
+        if (!productCode.equals(rows.get(0).get("product_code"))) throw error(409, "此订单请求已用于其他套餐，请重新创建");
         return order(user, str(rows.get(0), "id"));
       }
       String id = id(),
         merchantNo = mode.toUpperCase(Locale.ROOT) + "_" + id.replace("-", "");
       var a = settings.active();
       s.db.update(
-        "INSERT INTO purchase_orders(id,user_id,request_key,amount_cents,mode,status,created_at,app_id,seller_id,account_scope,merchant_order_no,expires_at) VALUES (?,?,?,?,?,'PENDING',?,?,?,?,?,?)",
+        "INSERT INTO purchase_orders(id,user_id,request_key,amount_cents,mode,status,created_at,app_id,seller_id,account_scope,merchant_order_no,expires_at,product_code,product_name,training_limit,lifetime) VALUES (?,?,?,?,?,'PENDING',?,?,?,?,?,?,?,?,?,?)",
         id,
         user,
         key,
-        settings.getPriceCents(),
+        product.get("amountCents"),
         mode,
         now(),
         mode.equals("mock") ? "" : a.getAppId(),
         mode.equals("mock") ? "" : a.getSellerId(),
         scope(),
         merchantNo,
-        now() + settings.getOrderTtlMinutes() * 60000L
+        now() + settings.getOrderTtlMinutes() * 60000L,
+        productCode, product.get("name"), product.get("trainingLimit"), product.get("lifetime")
       );
       return order(user, id);
     });
@@ -186,32 +191,63 @@ public class PaymentService {
     );
   }
 
+  List<Map<String, Object>> products() {
+    return List.of(
+      Map.of("code", "TEN_TRAININGS", "name", "10 次训练套餐", "amountCents", settings.getPriceCents(),
+        "trainingLimit", 10, "lifetime", false, "description", "深挖与关联复测共用 10 次，无时间限制"),
+      Map.of("code", "LIFETIME", "name", "永久训练套餐", "amountCents", 999900,
+        "trainingLimit", 0, "lifetime", true, "description", "永久不限训练次数，无自动续费")
+    );
+  }
+
+  static boolean legacy(Map<String, Object> pack) {
+    return "LEGACY_PAIR".equals(pack.get("product_code"));
+  }
+
+  static boolean available(Map<String, Object> pack, String kind) {
+    if (legacy(pack)) return !Boolean.TRUE.equals(pack.get(kind.equals("DEEP") ? "deep_used" : "retest_used"));
+    return Boolean.TRUE.equals(pack.get("lifetime")) ||
+      ((Number) pack.get("training_used")).longValue() < ((Number) pack.get("training_limit")).longValue();
+  }
+
+  Map<String, Object> quota(List<Map<String, Object>> packs) {
+    long shared = 0, deep = 0, retest = 0;
+    boolean unlimited = false;
+    for (var pack : packs) {
+      if (legacy(pack)) {
+        if (available(pack, "DEEP")) deep++;
+        if (available(pack, "RETEST")) retest++;
+      } else if (Boolean.TRUE.equals(pack.get("lifetime"))) unlimited = true;
+      else shared += ((Number)pack.get("training_limit")).longValue() - ((Number)pack.get("training_used")).longValue();
+    }
+    return Map.of("unlimited", unlimited, "sharedRemaining", shared, "legacyDeepRemaining", deep,
+      "legacyRetestRemaining", retest, "deepAvailable", shared + deep, "retestAvailable", shared + retest);
+  }
+
   Map<String, Object> shop(String user) {
     var orders = s.db.queryForList(
       "SELECT * FROM purchase_orders WHERE user_id=? ORDER BY created_at DESC",
       user
     );
     for (int i=0; i<orders.size(); i++) orders.set(i, order(user, str(orders.get(i), "id")));
+    var packs = packages(user);
     return Map.of(
       "product",
-      Map.of(
-        "name",
-        "项目深挖训练包",
-        "amountCents",
-        settings.getPriceCents(),
-        "description",
-        "一次完整深挖 + 一次关联专项复测"
-      ),
+      products().get(0),
+      "products", products(),
+      "quota", quota(packs),
       "mode",
       mode,
       "configured",
       configured(),
+      "operationsEnabled",
+      !mode.equals("mock") && settings.isOperationsEnabled(),
       "configurationIssues",
       settings.issues(),
       "orders",
       orders,
       "packages",
-      packages(user)
+      packs
     );
   }
 
@@ -292,10 +328,10 @@ public class PaymentService {
       );
       String packageId = id();
       s.db.update(
-        "INSERT INTO training_packages(id,user_id,order_id) VALUES (?,?,?)",
+        "INSERT INTO training_packages(id,user_id,order_id,product_code,training_limit,lifetime) VALUES (?,?,?,?,?,?)",
         packageId,
         order.get("user_id"),
-        orderId
+        orderId, order.get("product_code"), order.get("training_limit"), order.get("lifetime")
       );
       s.db.update(
         "INSERT INTO entitlement_events VALUES (?,?,?,?,?)",
@@ -377,7 +413,7 @@ public class PaymentService {
             "total_amount",
             yuan(o),
             "subject",
-            "项目追问官训练包",
+            "项目追问官 · " + o.get("product_name"),
             "product_code",
             "FAST_INSTANT_TRADE_PAY",
             "timeout_express",
