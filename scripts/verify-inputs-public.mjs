@@ -1,0 +1,93 @@
+import { chromium } from "../frontend/node_modules/playwright-core/index.mjs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+const emptyProject = { name: "", background: "", targetRole: "", stack: "", responsibility: "", resume: "", architecture: "", implementation: "", problems: "", verification: "", materials: "", facts: [], factsConfirmed: false };
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const output = path.join(root, ".runtime/resume-dedup-acceptance");
+await mkdir(output, { recursive: true });
+const base = "https://39.96.27.134";
+const browser = await chromium.launch({ channel: "msedge", headless: true, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
+const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, permissions: ["microphone"] });
+const page = await context.newPage();
+const errors = [];
+let paymentWrites = 0;
+page.on("pageerror", error => errors.push(error.message));
+page.on("request", request => { if (request.method() !== "GET" && /\/api\/(orders|payments)/.test(request.url())) paymentWrites++; });
+const assert = (value, message) => { if (!value) throw new Error(message); };
+const wait = async (locator, text) => {
+  await locator.waitFor({ state: "visible", timeout: 70000 });
+  if (text) assert((await locator.textContent()).includes(text), "页面状态与预期不一致");
+};
+const source = "合成验收简历，不代表真实求职经历。\n求职意向：Java 后端实习\n项目经历\n校园预约系统\n技术栈：Java / Spring Boot / PostgreSQL\n项目背景：学生预约自习室座位。\n个人职责：我负责预约创建接口和并发测试。\n关键实现：使用唯一约束限制同一座位和时段的有效预约。\n验证方式：构造两个并发请求，预期只有一个成功；尚未记录实际结果。\n";
+try {
+  const registration = await context.request.post(base + "/api/auth/register", { headers: { Origin: base }, data: { username: "public-inputs-" + crypto.randomUUID(), password: crypto.randomUUID() + crypto.randomUUID() } });
+  assert(registration.ok(), "合成账号注册失败");
+  const config = await (await context.request.get(base + "/api/config")).json();
+  assert(config.speechEnabled && config.resumeImportEnabled && config.modelMode === "live", "线上识别配置未启用");
+  const entry = await context.request.get(base + "/");
+  assert(entry.headers()["content-security-policy"].includes("media-src 'self' blob:"), "未允许本地录音试听");
+  const speechProof = JSON.parse(await readFile(path.join(root, ".runtime/input-acceptance/speech-provider.json"), "utf8"));
+  assert(speechProof.status === "PASSED", "真实语音模型验收未通过");
+  await page.goto(base + "/#/projects/new");
+  await wait(page.getByRole("button", { name: "导入简历", exact: true }));
+  assert(!(await page.locator(".mode-strip").textContent()).includes("真实 AI"), "顶部仍显示真实AI");
+  await page.getByRole("checkbox", { name: "同意将简历文字发送至模型服务，并在本账号缓存识别结果30天" }).check();
+  const responsePromise = page.waitForResponse(response => response.url().endsWith("/api/resume/import") && response.request().method() === "POST", { timeout: 80000 });
+  await page.getByLabel("上传简历文件").setInputFiles({ name: "synthetic-resume.txt", mimeType: "text/plain", buffer: Buffer.from(source) });
+  const response = await responsePromise;
+  const parsed = await response.json();
+  assert(response.ok(), "公网简历识别失败：" + (parsed.message || response.status()));
+  assert(parsed.projects?.length > 0, "未识别出合成项目");
+  assert(parsed.duplicate === false, "新账号首次导入不应命中缓存");
+  const selected = parsed.projects.find(project => project.name.includes("校园预约"));
+  assert(selected && selected.responsibility.includes("我负责预约"), "合成项目名称或职责识别不正确");
+  for (const value of Object.values(selected)) assert(typeof value === "string" && (!value || source.includes(value)), "识别结果未来自原文");
+  // Reload and rename to verify a persistent server cache, not browser state.
+  await wait(page.locator(".resume-candidate").first());
+  await page.reload();
+  await page.getByRole("checkbox", { name: "同意将简历文字发送至模型服务，并在本账号缓存识别结果30天" }).check();
+  const duplicatePromise = page.waitForResponse(response => response.url().endsWith("/api/resume/import") && response.request().method() === "POST");
+  await page.getByLabel("上传简历文件").setInputFiles({ name: "renamed-resume.txt", mimeType: "text/plain", buffer: Buffer.from("\uFEFF" + source.replaceAll("\n", "\r\n")) });
+  const duplicateResponse = await duplicatePromise;
+  const duplicate = await duplicateResponse.json();
+  assert(duplicateResponse.ok() && duplicate.duplicate === true, "改名重复上传未复用缓存");
+  assert(JSON.stringify(duplicate.projects) === JSON.stringify(parsed.projects) && duplicate.recognizedAt === parsed.recognizedAt, "缓存结果或首次识别时间不一致");
+  await wait(page.getByRole("status"), "这份简历已上传过");
+  await wait(page.locator(".resume-candidate").first());
+  await page.locator(".resume-candidate").filter({ hasText: selected.name }).getByRole("button", { name: "使用这个项目" }).click();
+  assert(await page.getByLabel("项目名称", { exact: true }).inputValue() === selected.name, "项目未自动填入");
+  assert(await page.getByLabel("个人职责（必填）", { exact: true }).inputValue() === selected.responsibility, "职责未自动填入");
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "简历页面横向溢出");
+    await page.screenshot({ path: path.join(output, `resume-public-${width}.png`), fullPage: true });
+  }
+  // Only the interview view uses synthetic API fixtures; no training or order is created.
+  const trainingId = crypto.randomUUID(), turnId = crypto.randomUUID();
+  const fixture = { id: trainingId, status: "ACTIVE", kind: "DEEP", maxTurns: 5, leaseUntil: 0, createdAt: Date.now(), modelMode: "live", project: { ...emptyProject, ...selected, id: crypto.randomUUID(), version: 1, facts: [], factsConfirmed: true }, turns: [{ id: turnId, question: "请介绍这个合成项目，以及你负责的部分。", topic: "项目介绍", answer: "" }] };
+  await page.route("**/api/trainings/" + trainingId, route => route.fulfill({ json: fixture }));
+  await page.route("**/api/trainings/" + trainingId + "/transcribe", route => route.fulfill({ json: { text: "我负责预约接口，验证结果尚待补充。" } }));
+  await page.goto(base + "/#/trainings/" + trainingId);
+  await wait(page.getByLabel("你的回答", { exact: true }));
+  await page.getByRole("checkbox", { name: "同意将本段录音发送至百炼进行语音识别" }).check();
+  await page.getByRole("button", { name: "开始录音", exact: true }).click();
+  await wait(page.getByRole("button", { name: "结束录音", exact: true }));
+  await page.waitForTimeout(1000);
+  await page.getByRole("button", { name: "结束录音", exact: true }).click();
+  await wait(page.locator("audio"));
+  await page.locator("audio").evaluate(audio => audio.play());
+  await page.getByRole("button", { name: "转为文字", exact: true }).click();
+  await wait(page.getByLabel("语音转写结果"));
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "语音页面横向溢出");
+    await page.screenshot({ path: path.join(output, `voice-public-${width}.png`), fullPage: true });
+  }
+  assert(paymentWrites === 0 && errors.length === 0, "公网页面有脚本错误或交易写入");
+  await context.request.post(base + "/api/auth/logout", { headers: { Origin: base } });
+  const result = { status: "PASSED", liveResumeImportVerified: true, persistentResumeDedupVerified: true, renamedFileAndNormalizedLineEndingsVerified: true, liveSpeechProviderVerifiedPreviously: true, speechUiUsesSyntheticFixtures: true, tlsVerified: true, microphoneAndPlaybackVerified: true, paymentWrites, scriptErrors: errors.length, userMaterialReads: 0, projectSaves: 0, widths: [1440, 390] };
+  await writeFile(path.join(output, "public-result.json"), JSON.stringify(result, null, 2));
+  console.log(JSON.stringify(result));
+} finally { await context.close(); await browser.close(); }
