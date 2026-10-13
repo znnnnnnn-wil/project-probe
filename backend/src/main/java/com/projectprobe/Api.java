@@ -15,6 +15,7 @@ public class Api {
   final PaymentService payments;
   final ModelService model;
   final PaymentOperations paymentOperations;
+  final InputService inputs;
 
   Api(
     Store s,
@@ -23,7 +24,8 @@ public class Api {
     TrainingService trainings,
     PaymentService payments,
     ModelService model,
-    PaymentOperations paymentOperations
+    PaymentOperations paymentOperations,
+    InputService inputs
   ) {
     this.s = s;
     this.auth = auth;
@@ -32,6 +34,7 @@ public class Api {
     this.payments = payments;
     this.model = model;
     this.paymentOperations = paymentOperations;
+    this.inputs = inputs;
   }
 
   @GetMapping("/health")
@@ -44,10 +47,14 @@ public class Api {
     return Map.of(
       "modelMode",
       model.mode,
+      "modelName",
+      model.mode.equals("live") ? model.model : "",
       "paymentMode",
       payments.mode,
       "paymentConfigured",
-      payments.configured()
+      payments.configured(),
+      "speechEnabled", inputs.speechReady(),
+      "resumeImportEnabled", model.mode.equals("live")
     );
   }
 
@@ -103,6 +110,23 @@ public class Api {
     return projects.extract(auth.user(r), id);
   }
 
+  @PostMapping(value = "/resume/import", consumes = "multipart/form-data")
+  Object importResume(HttpServletRequest r, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+    return inputs.resume(auth.user(r), file);
+  }
+
+  @PostMapping(value = "/trainings/{id}/transcribe", consumes = "multipart/form-data")
+  Object transcribe(HttpServletRequest r, @PathVariable String id,
+    @RequestParam("turnId") String turnId, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+    String user = auth.user(r);
+    var training = trainings.get(user, id);
+    var turns = Store.list(training, "turns");
+    if (!"ACTIVE".equals(training.get("status")) || turns.isEmpty() ||
+      !turnId.equals(turns.get(turns.size() - 1).get("id")) || !Store.str(turns.get(turns.size() - 1), "answer").isBlank())
+      throw Store.error(409, "本题已结束，请重新加载当前问题");
+    return inputs.transcribe(user, file);
+  }
+
   @PostMapping("/projects/{id}/confirm")
   Object confirm(
     HttpServletRequest r,
@@ -139,6 +163,15 @@ public class Api {
   @PostMapping("/trainings/{id}/finish")
   Object finish(HttpServletRequest r, @PathVariable String id) {
     return trainings.finish(auth.user(r), id);
+  }
+
+  @PostMapping("/trainings/{id}/plan")
+  Object savePlan(
+    HttpServletRequest r,
+    @PathVariable String id,
+    @RequestBody Map<String, Object> b
+  ) {
+    return trainings.savePlan(auth.user(r), id, b);
   }
 
   @PostMapping("/trainings/{id}/retry")
