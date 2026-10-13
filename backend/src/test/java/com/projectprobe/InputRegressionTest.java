@@ -466,14 +466,307 @@ class InputRegressionTest {
     }
   }
 
+  @Test
+  void expiredCacheIsIgnoredAndPurged() {
+    String user = user();
+    var model = resumeModel("model-a");
+    doReturn(Map.of("projects", List.of(candidate())))
+      .when(model)
+      .call(anyString(), any());
+    var service = new InputService(s, model);
+    service.resume(user, resumeFile("first.txt", ""));
+    s.db.update(
+      "UPDATE resume_import_cache SET expires_at=0 WHERE user_id=?",
+      user
+    );
+    assertEquals(
+      false,
+      service.resume(user, resumeFile("first.txt", "")).get("duplicate")
+    );
+    verify(model, times(2)).call(anyString(), any());
+    s.db.update(
+      "UPDATE resume_import_cache SET expires_at=0 WHERE user_id=?",
+      user
+    );
+    service.purgeExpiredResumes();
+    assertEquals(
+      0,
+      s.db.queryForObject(
+        "SELECT COUNT(*) FROM resume_import_cache WHERE user_id=?",
+        Integer.class,
+        user
+      )
+    );
+  }
 
+  @Test
+  void cacheAppearingDuringClaimSkipsOperationAndQuota() {
+    String user = user();
+    var reads = new java.util.concurrent.atomic.AtomicInteger();
+    assertEquals(
+      "cached",
+      inputs.limited(
+        user,
+        "TEST",
+        1,
+        () -> reads.incrementAndGet() == 1 ? null : "cached",
+        () -> {
+          fail("must not call model");
+          return "unused";
+        },
+        result -> fail("must not overwrite cache")
+      )
+    );
+    assertEquals(
+      0,
+      s.db.queryForObject(
+        "SELECT COUNT(*) FROM input_limits WHERE user_id=?",
+        Integer.class,
+        user
+      )
+    );
+  }
 
+  @Test
+  void validatesGroundedResumeAndLeavesUnknownEmpty() {
+    var result = InputService.validateResume(
+      Map.of("projects", List.of(candidate())),
+      "预约系统，我负责接口"
+    );
+    assertEquals(
+      "",
+      modelObjects(result, "projects", 4).get(0).get("verification")
+    );
+  }
 
+  @Test
+  void rejectsInventedOrCrossProjectClaims() {
+    var p = candidate();
+    p.put("verification", "压测十万请求");
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateResume(
+        Map.of("projects", List.of(p)),
+        "预约系统，我负责接口"
+      )
+    );
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateResume(
+        Map.of("projects", List.of(p)),
+        "预约系统，我负责接口\n另一个项目压测十万请求"
+      )
+    );
+  }
 
+  @Test
+  void acceptsBoundedWavAndRejectsDurationOrHeaders() {
+    InputService.validateWav(wav(16000, 1));
+    InputService.validateWav(wav(16000, 180));
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateWav(wav(16000, 181))
+    );
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateWav(new byte[50])
+    );
+    var bad = wav(16000, 1);
+    bad[40] = 0;
+    bad[41] = 0;
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateWav(bad)
+    );
+  }
 
+  @Test
+  void disabledSpeechDoesNotCallProvider() {
+    assertFalse(inputs.speechReady());
+    assertThrows(ResponseStatusException.class, () ->
+      inputs.transcribe(user(), file("x.wav", wav(16000, 1)))
+    );
+  }
 
+  @Test
+  void limitsCallsAndReleasesFailedLease() {
+    String user = user();
+    assertThrows(IllegalStateException.class, () ->
+      inputs.limited(user, "TEST", 2, () -> {
+        throw new IllegalStateException();
+      })
+    );
+    assertEquals("ok", inputs.limited(user, "TEST", 2, () -> "ok"));
+    assertEquals(
+      429,
+      assertThrows(ResponseStatusException.class, () ->
+        inputs.limited(user, "TEST", 2, () -> "no")
+      )
+        .getStatusCode()
+        .value()
+    );
+    assertEquals(
+      0L,
+      (
+        (Number) s
+          .one(
+            "SELECT lease_until FROM input_limits WHERE user_id=? AND kind='TEST'",
+            user
+          )
+          .get("lease_until")
+      ).longValue()
+    );
+  }
 
+  @Test
+  void concurrentSameUserCannotObtainTwoLeases() throws Exception {
+    String user = user();
+    var entered = new CountDownLatch(1);
+    var exit = new CountDownLatch(1);
+    var pool = Executors.newSingleThreadExecutor();
+    try {
+      var first = pool.submit(() ->
+        inputs.limited(user, "TEST", 10, () -> {
+          entered.countDown();
+          try {
+            exit.await(5, TimeUnit.SECONDS);
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+          return "ok";
+        })
+      );
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      assertEquals(
+        409,
+        assertThrows(ResponseStatusException.class, () ->
+          inputs.limited(user, "TEST", 10, () -> "no")
+        )
+          .getStatusCode()
+          .value()
+      );
+      exit.countDown();
+      assertEquals("ok", first.get(5, TimeUnit.SECONDS));
+    } finally {
+      exit.countDown();
+      pool.shutdownNow();
+    }
+  }
 
+  @Test
+  void staleLeaseCannotReturnOrClearNewOwner() {
+    String user = user();
+    String newToken = id();
+    assertThrows(ResponseStatusException.class, () ->
+      inputs.limited(user, "TEST", 10, () -> {
+        s.db.update(
+          "UPDATE input_limits SET lease_token=? WHERE user_id=? AND kind='TEST'",
+          newToken,
+          user
+        );
+        return "stale";
+      })
+    );
+    assertEquals(
+      newToken,
+      s
+        .one(
+          "SELECT lease_token FROM input_limits WHERE user_id=? AND kind='TEST'",
+          user
+        )
+        .get("lease_token")
+    );
+  }
 
+  @Test
+  void uploadRequiresSessionAndOrigin() throws Exception {
+    mvc
+      .perform(
+        multipart("/api/resume/import")
+          .file(file("x.txt", "Synthetic resume with project text".getBytes()))
+          .header("Origin", "http://localhost:5173")
+      )
+      .andExpect(status().isUnauthorized());
+    mvc
+      .perform(
+        multipart("/api/resume/import")
+          .file(file("x.txt", new byte[30]))
+          .header("Origin", "https://evil.example")
+      )
+      .andExpect(status().isForbidden());
+  }
 
+  @Test
+  void speechEndpointRejectsOtherUserAndStaleTurn() throws Exception {
+    var response = new org.springframework.mock.web.MockHttpServletResponse();
+    String owner = str(
+      auth.login(
+        Map.of(
+          "username",
+          "input-api-" + id(),
+          "password",
+          "synthetic-input-password"
+        ),
+        true,
+        response
+      ),
+      "id"
+    );
+    var cookie = response.getCookie("probe_session");
+    assertNotNull(cookie);
+    var project = projects.save(
+      owner,
+      null,
+      Map.of("name", "合成项目", "responsibility", "我负责接口")
+    );
+    project = projects.extract(owner, str(project, "id"));
+    project = projects.confirm(
+      owner,
+      str(project, "id"),
+      new HashMap<>(
+        Map.of("version", project.get("version"), "facts", project.get("facts"))
+      )
+    );
+    var order = payments.create(owner, Map.of("requestKey", id()));
+    payments.mock(owner, str(order, "id"));
+    var training = trainings.start(
+      owner,
+      Map.of("projectId", project.get("id"), "requestKey", id())
+    );
+    String trainingId = str(training, "id"),
+      turnId = str(list(training, "turns").get(0), "id");
+    mvc
+      .perform(
+        multipart("/api/trainings/" + trainingId + "/transcribe")
+          .file(file("x.wav", wav(16000, 1)))
+          .param("turnId", id())
+          .cookie(cookie)
+          .header("Origin", "http://localhost:5173")
+      )
+      .andExpect(status().isConflict());
+    mvc
+      .perform(
+        multipart("/api/trainings/" + trainingId + "/transcribe")
+          .file(file("x.wav", wav(16000, 1)))
+          .param("turnId", turnId)
+          .cookie(cookie)
+          .header("Origin", "http://localhost:5173")
+      )
+      .andExpect(status().isServiceUnavailable());
+    var other = new org.springframework.mock.web.MockHttpServletResponse();
+    auth.login(
+      Map.of(
+        "username",
+        "input-other-" + id(),
+        "password",
+        "synthetic-input-password"
+      ),
+      true,
+      other
+    );
+    mvc
+      .perform(
+        multipart("/api/trainings/" + trainingId + "/transcribe")
+          .file(file("x.wav", wav(16000, 1)))
+          .param("turnId", turnId)
+          .cookie(other.getCookie("probe_session"))
+          .header("Origin", "http://localhost:5173")
+      )
+      .andExpect(status().isNotFound());
+  }
 }
