@@ -87,8 +87,126 @@ class WorkflowTest {
 
   String grant(String user) {
     var order = payments.create(user, Map.of("requestKey", id()));
+    // 旧闭环继续验证迁移前的一深挖一复测套餐。
+    s.db.update("UPDATE purchase_orders SET product_code='LEGACY_PAIR',training_limit=2 WHERE id=?", order.get("id"));
     payments.mock(user, str(order, "id"));
     return str(order, "id");
+  }
+
+  Map<String, Object> grantProduct(String user, String code) {
+    var order = payments.create(user, Map.of("requestKey", id(), "productCode", code));
+    payments.mock(user, str(order, "id"));
+    return order;
+  }
+
+  long used(String user) {
+    return ((Number) payments.packages(user).get(0).get("training_used")).longValue();
+  }
+
+  @Test
+  void tenTrainingsShareDeepAndRetestQuotaAndResumeDoesNotCharge() {
+    String u = user();
+    var p = project(u);
+    grantProduct(u, "TEN_TRAININGS");
+    var deep = complete(u, start(u, p));
+    assertEquals(1, used(u));
+    var request = Map.<String, Object>of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id());
+    var retest = trainings.start(u, request);
+    assertEquals(2, used(u));
+    assertEquals(retest.get("id"), trainings.start(u, request).get("id"));
+    assertEquals(retest.get("id"), trainings.start(u, new HashMap<>(Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()))).get("id"));
+    assertEquals(2, used(u));
+    for (int i = 0; i < 8; i++) start(u, p);
+    assertEquals(10, used(u));
+    assertEquals(409, assertThrows(ResponseStatusException.class, () -> start(u, p)).getStatusCode().value());
+    assertEquals(0L, ((Map<?, ?>)payments.shop(u).get("quota")).get("sharedRemaining"));
+  }
+
+  @Test
+  void sharedQuotaRefundIsExactlyOnceAndCanBeReused() {
+    String u = user();
+    var p = project(u);
+    grantProduct(u, "TEN_TRAININGS");
+    var t = start(u, p);
+    assertEquals(1, used(u));
+    s.db.update("UPDATE trainings SET status='FAILED' WHERE id=?", t.get("id"));
+    trainings.refund(u, str(t, "id"));
+    trainings.refund(u, str(t, "id"));
+    assertEquals(0, used(u));
+    start(u, p);
+    assertEquals(1, used(u));
+    var deep = complete(u, start(u, p));
+    var retest = trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()));
+    assertEquals(3, used(u));
+    s.db.update("UPDATE trainings SET status='FAILED' WHERE id=?", retest.get("id"));
+    trainings.refund(u, str(retest, "id"));
+    trainings.refund(u, str(retest, "id"));
+    assertEquals(2, used(u));
+    assertEquals("AVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
+  }
+
+  @Test
+  void lifetimePriceIsServerDefinedAndUsageIsUnlimited() {
+    String u = user();
+    var order = payments.create(u, Map.of("requestKey", id(), "productCode", "LIFETIME", "amountCents", 1, "trainingLimit", 9999999));
+    assertEquals(999900, order.get("amount_cents"));
+    assertEquals(true, order.get("lifetime"));
+    payments.mock(u, str(order, "id"));
+    payments.mock(u, str(order, "id"));
+    assertEquals(1, payments.packages(u).size());
+    var p = project(u);
+    for (int i = 0; i < 12; i++) start(u, p);
+    assertEquals(12, used(u));
+    assertEquals(true, ((Map<?, ?>)payments.shop(u).get("quota")).get("unlimited"));
+  }
+
+  @Test
+  void packageSelectionRejectsUnknownProductsAndReusedKeyForDifferentProduct() {
+    String u = user();
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+      () -> payments.create(u, Map.of("requestKey", id(), "productCode", "LEGACY_PAIR"))).getStatusCode().value());
+    String key = id();
+    var order = payments.create(u, Map.of("requestKey", key, "productCode", "TEN_TRAININGS"));
+    assertEquals(990, order.get("amount_cents"));
+    assertEquals(10, order.get("training_limit"));
+    assertEquals(order.get("id"), payments.create(u, Map.of("requestKey", key, "productCode", "TEN_TRAININGS")).get("id"));
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+      () -> payments.create(u, Map.of("requestKey", key, "productCode", "LIFETIME"))).getStatusCode().value());
+  }
+
+  @Test
+  void concurrentSharedQuotaCannotOverspendTenStarts() throws Exception {
+    String u = user();
+    var p = project(u);
+    grantProduct(u, "TEN_TRAININGS");
+    var executor = Executors.newFixedThreadPool(12);
+    try {
+      var jobs = new ArrayList<Callable<Boolean>>();
+      for (int i = 0; i < 18; i++) jobs.add(() -> {
+        try { start(u, p); return true; }
+        catch (ResponseStatusException e) { assertEquals(409, e.getStatusCode().value()); return false; }
+      });
+      int successful = 0;
+      for (var future : executor.invokeAll(jobs)) if (future.get()) successful++;
+      assertEquals(10, successful);
+      assertEquals(10, used(u));
+    } finally { executor.shutdownNow(); }
+  }
+
+  @Test
+  void newPackageCanFundRetestFromExhaustedPackage() {
+    String u = user();
+    var p = project(u);
+    var order = grantProduct(u, "TEN_TRAININGS");
+    var deep = complete(u, start(u, p));
+    for (int i = 0; i < 9; i++) start(u, p);
+    assertEquals("UNAVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
+    grantProduct(u, "TEN_TRAININGS");
+    assertEquals("AVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
+    var retest = trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()));
+    assertNotEquals(deep.get("packageId"), retest.get("packageId"));
+    assertEquals(10L, ((Number)s.one("SELECT training_used FROM training_packages WHERE order_id=?", order.get("id")).get("training_used")).longValue());
+    assertEquals(retest.get("id"), trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id())).get("id"));
   }
 
   Map<String, Object> start(String user, Map<String, Object> p) {
@@ -179,6 +297,45 @@ class WorkflowTest {
       payments.mock(other, order)
     );
     assertTrue(projects.all(other).isEmpty());
+  }
+
+  @Test
+  void reportPlanIsPersistedScopedAndDoesNotRewriteEvidence() throws Exception {
+    String u = user();
+    var p = project(u);
+    grant(u);
+    var active = start(u, p);
+    String tid = str(active, "id");
+    var change = Map.<String, Object>of("taskIndex", 0, "done", true, "note", "并发测试记录待补充", "version", 0);
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+      () -> trainings.savePlan(u, tid, change)).getStatusCode().value());
+    var complete = complete(u, active);
+    String evidence = s.encode(complete.get("report"));
+    var saved = trainings.savePlan(u, tid, change);
+    assertEquals(1, saved.get("planVersion"));
+    assertEquals(true, list(trainings.get(u, tid), "reportPlan").get(0).get("done"));
+    assertEquals(evidence, s.encode(saved.get("report")));
+    assertEquals(409, assertThrows(ResponseStatusException.class,
+      () -> trainings.savePlan(u, tid, change)).getStatusCode().value());
+    assertEquals(404, assertThrows(ResponseStatusException.class,
+      () -> trainings.savePlan(user(), tid, change)).getStatusCode().value());
+    for (Object invalid : List.of(-1, 0.5, 100, "0")) {
+      var invalidChange = new HashMap<>(change);
+      invalidChange.put("taskIndex", invalid);
+      invalidChange.put("version", 1);
+      assertEquals(400, assertThrows(ResponseStatusException.class,
+        () -> trainings.savePlan(u, tid, invalidChange)).getStatusCode().value());
+    }
+    var oversized = new HashMap<>(change);
+    oversized.put("version", 1);
+    oversized.put("note", "x".repeat(2001));
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+      () -> trainings.savePlan(u, tid, oversized)).getStatusCode().value());
+    var undone = trainings.savePlan(u, tid, Map.of("taskIndex", 0, "done", false, "note", "尚未完成", "version", 1));
+    assertEquals(2, undone.get("planVersion"));
+    assertEquals(1, list(undone, "reportPlan").size());
+    assertEquals(false, list(undone, "reportPlan").get(0).get("done"));
+    assertEquals(evidence, s.encode(undone.get("report")));
   }
 
   @Test
