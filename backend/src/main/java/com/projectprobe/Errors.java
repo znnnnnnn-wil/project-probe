@@ -8,6 +8,16 @@ import org.springframework.web.server.ResponseStatusException;
 @RestControllerAdvice
 public class Errors {
 
+  @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+  ResponseEntity<?> uploadTooLarge() {
+    return ResponseEntity.status(413).body(Map.of("message", "文件过大，请缩小后再上传"));
+  }
+
+  @ExceptionHandler(org.springframework.web.multipart.support.MissingServletRequestPartException.class)
+  ResponseEntity<?> missingFile() {
+    return ResponseEntity.badRequest().body(Map.of("message", "请选择要上传的文件"));
+  }
+
   @ExceptionHandler(ResponseStatusException.class)
   ResponseEntity<?> expected(ResponseStatusException e) {
     return ResponseEntity.status(e.getStatusCode()).body(
