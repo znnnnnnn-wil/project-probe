@@ -10,6 +10,10 @@ logging:
     sdk.biz.err: OFF
     sdk.biz.info: OFF
 spring:
+  servlet:
+    multipart:
+      max-file-size: 6MB
+      max-request-size: 7MB
   datasource:
     url: ${DB_URL:jdbc:h2:file:./data/projectprobe;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;WRITE_DELAY=0}
     username: ${DB_USER:sa}
@@ -31,6 +35,13 @@ app:
   model-key: ${MODEL_API_KEY:}
   model-name: ${MODEL_NAME:}
   model-provider: ${MODEL_PROVIDER:OpenAI-compatible}
+  speech-enabled: ${SPEECH_ENABLED:false}
+  speech-paid-allowed: ${SPEECH_PAID_ALLOWED:false}
+  speech-free-quota-confirmed-model: ${SPEECH_FREE_QUOTA_CONFIRMED_MODEL:}
+  speech-model: ${SPEECH_MODEL:qwen3-asr-flash}
+  speech-url: ${SPEECH_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+  speech-key: ${SPEECH_API_KEY:}
+  speech-daily-limit: ${SPEECH_DAILY_LIMIT:20}
   payment-mode: ${PAYMENT_MODE:mock}
   payment:
     mode: ${PAYMENT_MODE:mock}

@@ -36,7 +36,11 @@ public class WebConfig extends OncePerRequestFilter {
       "Cache-Control",
       "no-store"
     );
-    if (req.getContentLengthLong() > 200000) {
+    boolean upload = req.getMethod().equals("POST") && (
+      req.getRequestURI().equals("/api/resume/import") ||
+      req.getRequestURI().matches("/api/trainings/[a-f0-9-]{36}/transcribe")
+    ) && Objects.toString(req.getContentType(), "").startsWith("multipart/form-data");
+    if (req.getContentLengthLong() > (upload ? 7 * 1024 * 1024 : 200000)) {
       res.sendError(413);
       return;
     }
