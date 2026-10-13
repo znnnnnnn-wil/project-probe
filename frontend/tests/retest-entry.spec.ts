@@ -3,7 +3,8 @@ import { demoProject } from "../src/api";
 import type { Training } from "../src/types";
 async function seed(page: Page) {
   const headers = {
-    Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174").origin,
+    Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174")
+      .origin,
   };
   const api = page.context().request;
   async function post(path: string, data: unknown = {}) {
@@ -37,7 +38,7 @@ async function seed(page: Page) {
   const first: Training = await deep();
   return { project, first, deep, post, headers };
 }
-test("同一项目两份训练包的复测入口相互独立", async ({ page }) => {
+test("同一项目多轮深挖的复测入口按父训练独立关联", async ({ page }) => {
   const { project, first, deep, post } = await seed(page);
   const second: Training = await deep();
   const retest: Training = await post("/trainings", {
@@ -62,7 +63,10 @@ test("同一项目两份训练包的复测入口相互独立", async ({ page }) 
     await page.context().request.get("/api/trainings/" + freshId)
   ).json();
   expect(value.parentId).toBe(second.id);
-  expect(value.packageId).not.toBe(retest.packageId);
+  expect(value.id).not.toBe(retest.id);
+  expect(value.parentId).not.toBe(retest.parentId);
+  const balance = await (await page.context().request.get("/api/shop")).json();
+  expect(balance.quota.sharedRemaining).toBe(16);
 });
 test("失败的无首题复测可以从继续入口恢复生成", async ({ page }) => {
   const { project, first, post } = await seed(page);
@@ -123,7 +127,11 @@ test("已返还复测显示可重新开始，未核对材料也可以继续已�
     requestKey: crypto.randomUUID(),
   });
   await page.context().request.put("/api/projects/" + project.id, {
-    headers: { Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174").origin },
+    headers: {
+      Origin: new URL(
+        test.info().project.use.baseURL || "http://localhost:5174",
+      ).origin,
+    },
     data: { ...project, verification: "修订但尚未重新核对" },
   });
   await page.goto("/#/projects/" + project.id);
@@ -163,6 +171,7 @@ test("已返还复测显示可重新开始，未核对材料也可以继续已�
   await expect(
     page.getByRole("button", { name: "开始关联复测", exact: true }),
   ).toBeDisabled();
+  await page.getByRole("button", { name: "事实核对", exact: true }).click();
   await page.getByRole("button", { name: "提取项目事实", exact: true }).click();
   await page.getByRole("button", { name: "保存核对结果" }).click();
   await expect(

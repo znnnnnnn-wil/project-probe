@@ -7,7 +7,7 @@ test("桌面完整闭环：档案、事实、模拟权益、训练、刷新、�
   page.on("pageerror", (e) => errors.push(e.message));
   await page.goto("/");
   await expect(
-    page.getByRole("heading", { name: /项目是你做的/ }),
+    page.getByRole("heading", { name: "项目追问官", exact: true }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/home-desktop.png",
@@ -19,12 +19,15 @@ test("桌面完整闭环：档案、事实、模拟权益、训练、刷新、�
     .getByLabel("密码", { exact: true })
     .fill("synthetic-test-password");
   await page.getByRole("button", { name: "注册并开始" }).click();
+  await expect(page).toHaveURL(/#\/projects\/new$/);
+  await page.goto("/#/projects");
   await expect(
-    page.getByRole("heading", { name: "从一个真实项目开始" }),
+    page.getByRole("heading", { name: "我的项目", exact: true }),
   ).toBeVisible();
   await page.getByRole("button", { name: "新建项目" }).click();
   await page.getByRole("button", { name: "载入合成示例" }).click();
   await page.getByRole("button", { name: "保存项目材料" }).click();
+  await page.getByRole("button", { name: "事实核对", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "提取项目事实" }),
   ).toBeEnabled();
@@ -39,12 +42,14 @@ test("桌面完整闭环：档案、事实、模拟权益、训练、刷新、�
   const savedResponse = page.waitForResponse(
     (r) => r.request().method() === "PUT" && /\/api\/projects\//.test(r.url()),
   );
+  await page.getByRole("button", { name: "项目材料", exact: true }).click();
   await page.getByRole("button", { name: "保存项目材料" }).click();
   const unchanged = await (await savedResponse).json();
   expect(unchanged.factsConfirmed).toBe(true);
   const extractedResponse = page.waitForResponse((r) =>
     r.url().endsWith("/extract"),
   );
+  await page.getByRole("button", { name: "事实核对", exact: true }).click();
   await page.getByRole("button", { name: "读取已提取事实" }).click();
   const reused = await (await extractedResponse).json();
   expect(reused.version).toBe(unchanged.version);
@@ -82,9 +87,7 @@ test("桌面完整闭环：档案、事实、模拟权益、训练、刷新、�
         }),
       ).toBeVisible();
   }
-  await expect(
-    page.getByRole("heading", { name: "看清薄弱点，再往前一步。" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: /复盘报告$/ })).toBeVisible();
   await expect(page.locator(".finding")).toHaveCount(5);
   await expect(page.locator("blockquote").first()).toContainText(
     "数据库唯一约束",
@@ -102,6 +105,7 @@ test("桌面完整闭环：档案、事实、模拟权益、训练、刷新、�
       "补充合成测试设计：双实例并发预约，检查数据库约束冲突；在响应前断网重试，验证不会重复写入。实际压测数据尚未提供。",
     );
   await page.getByRole("button", { name: "保存项目材料" }).click();
+  await page.getByRole("button", { name: "事实核对", exact: true }).click();
   await page.getByRole("button", { name: "提取项目事实" }).click();
   await page.getByRole("button", { name: "保存核对结果" }).click();
   await page.getByRole("button", { name: "开始关联复测" }).click();
