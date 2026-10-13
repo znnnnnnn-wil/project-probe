@@ -781,6 +781,13 @@ class PaymentRegressionTest {
     assertEquals("OLD_TRADE", order.get("trade_no"));
     assertEquals("legacy", order.get("account_scope"));
     assertNull(order.get("merchant_order_no"));
+    assertEquals("LEGACY_PAIR", order.get("product_code"));
+    assertEquals(2, order.get("training_limit"));
+    assertEquals(false, order.get("lifetime"));
+    var legacyPack = db.queryForMap("SELECT * FROM training_packages WHERE id='p'");
+    assertEquals("LEGACY_PAIR", legacyPack.get("product_code"));
+    assertEquals(0L, legacyPack.get("training_used"));
+    assertEquals(false, legacyPack.get("retest_used"));
     assertEquals(
       true,
       db

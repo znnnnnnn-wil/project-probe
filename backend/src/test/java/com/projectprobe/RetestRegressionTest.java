@@ -67,7 +67,9 @@ class RetestRegressionTest {
     );
     p = projects.extract(u, str(p, "id"));
     p = projects.confirm(u, str(p, "id"), p);
-    payments.mock(u, str(payments.create(u, Map.of("requestKey", id())), "id"));
+    var legacyOrder = payments.create(u, Map.of("requestKey", id()));
+    s.db.update("UPDATE purchase_orders SET product_code='LEGACY_PAIR',training_limit=2 WHERE id=?", legacyOrder.get("id"));
+    payments.mock(u, str(legacyOrder, "id"));
     var deep = trainings.start(
       u,
       Map.of("projectId", p.get("id"), "requestKey", id())
