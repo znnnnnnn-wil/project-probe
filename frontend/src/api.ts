@@ -38,6 +38,33 @@ export async function api<T>(
 export const go = (path: string) => {
   location.hash = path;
 };
+export async function upload<T>(
+  path: string,
+  file: Blob,
+  filename: string,
+  extra: Record<string, string> = {},
+): Promise<T> {
+  const data = new FormData();
+  data.append("file", file, filename);
+  for (const [key, value] of Object.entries(extra)) data.append(key, value);
+  const response = await fetch("/api" + path, {
+    method: "POST",
+    credentials: "same-origin",
+    body: data,
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new ApiError(
+      response.status,
+      body.message ||
+        (response.status === 413
+          ? "文件过大，请缩小后再上传"
+          : response.status === 401
+            ? "登录已过期，请重新登录"
+            : "识别失败，请稍后重试"),
+    );
+  return body as T;
+}
 export const emptyProject = {
   name: "",
   background: "",
