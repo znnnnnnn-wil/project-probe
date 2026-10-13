@@ -55,12 +55,12 @@ public class TrainingService {
     var sourceOrder = s.one("SELECT * FROM purchase_orders WHERE id=?", pack.get("order_id"));
     payments.requireScope(sourceOrder);
     if (!"PAID".equals(sourceOrder.get("status"))) return Map.of("state", "UNAVAILABLE", "packageId", pack.get("id"));
-    // 按 parent + package 精确关联；返还旧尝试不遮蔽后续新尝试。
+    // 新套餐可为旧报告续费；仍按父训练定位已有复测，避免重复扣次。
     var children = s.db.queryForList(
-      "SELECT id,status FROM trainings WHERE user_id=? AND parent_id=? AND package_id=? AND kind='RETEST' ORDER BY created_at DESC,id DESC",
+      "SELECT t.id,t.status,t.package_id FROM trainings t JOIN training_packages p ON p.id=t.package_id JOIN purchase_orders o ON o.id=p.order_id WHERE t.user_id=? AND t.parent_id=? AND t.kind='RETEST' AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy')) ORDER BY t.created_at DESC,t.id DESC",
       user,
       deep.get("id"),
-      pack.get("id")
+      payments.mode, payments.scope()
     );
     for (var child : children) {
       String status = str(child, "status");
@@ -72,12 +72,12 @@ public class TrainingService {
         "trainingStatus",
         status,
         "packageId",
-        pack.get("id")
+        child.get("package_id")
       );
     }
-    boolean available =
-      deep.get("id").equals(pack.get("deep_training_id")) &&
-      !Boolean.TRUE.equals(pack.get("retest_used"));
+    boolean available = PaymentService.available(pack, "RETEST") &&
+      (!PaymentService.legacy(pack) || deep.get("id").equals(pack.get("deep_training_id")));
+    if (!available) available = sharedFunding(user) != null;
     return Map.of(
       "state",
       available ? "AVAILABLE" : "UNAVAILABLE",
@@ -86,6 +86,13 @@ public class TrainingService {
       "packageId",
       pack.get("id")
     );
+  }
+
+  Map<String, Object> sharedFunding(String user) {
+    return payments.packages(user).stream()
+      .filter(p -> !PaymentService.legacy(p) && PaymentService.available(p, "RETEST"))
+      .sorted(Comparator.comparing(p -> Boolean.TRUE.equals(p.get("lifetime"))))
+      .findFirst().orElse(null);
   }
 
   List<Map<String, Object>> all(String user) {
@@ -108,6 +115,33 @@ public class TrainingService {
     );
   }
 
+  Map<String, Object> savePlan(String user, String id, Map<String, Object> input) {
+    return s.locked(user, () -> {
+      var r = row(user, id);
+      if (!"COMPLETED".equals(r.get("status"))) throw error(409, "完成训练后才能保存复盘任务");
+      var body = s.decode(r.get("body"));
+      var report = (Map<String, Object>) body.get("report");
+      if (report == null) throw error(409, "报告尚未生成");
+      if (!(input.get("taskIndex") instanceof Number index) ||
+          index.doubleValue() != index.intValue() || index.intValue() < 0 ||
+          index.intValue() >= list(report, "findings").size()) throw error(400, "补充任务不存在");
+      if (!(input.get("done") instanceof Boolean) || !(input.get("note") instanceof String note) ||
+          note.length() > 2000) throw error(400, "任务状态或笔记格式不正确，笔记最多 2000 字");
+      int version = ((Number) body.getOrDefault("planVersion", 0)).intValue();
+      if (!(input.get("version") instanceof Number expected) ||
+          expected.doubleValue() != version) throw error(409, "复盘进度已在其他页面更新，请刷新后再保存");
+      var tasks = list(body, "reportPlan");
+      tasks.removeIf(task -> Objects.equals(task.get("taskIndex"), index.intValue()));
+      tasks.add(new LinkedHashMap<>(Map.of(
+        "taskIndex", index.intValue(), "done", input.get("done"),
+        "note", note.strip(), "updatedAt", now()
+      )));
+      body.put("planVersion", version + 1);
+      update(id, "COMPLETED", body);
+      return get(user, id);
+    });
+  }
+
   Map<String, Object> start(String user, Map<String, Object> input) {
     var training = s.locked(user, () -> {
       String requestKey = required(input, "requestKey", 100);
@@ -124,10 +158,8 @@ public class TrainingService {
       Map<String, Object> pack;
       Map<String, Object> parentBody = null;
       if (kind.equals("DEEP")) {
-        var packs = s.db.queryForList(
-          "SELECT p.* FROM training_packages p JOIN purchase_orders o ON o.id=p.order_id WHERE p.user_id=? AND p.deep_used=FALSE AND o.status='PAID' AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy')) ORDER BY p.id FOR UPDATE",
-          user, payments.mode, payments.scope()
-        );
+        var packs = payments.packages(user).stream().filter(p -> PaymentService.available(p, "DEEP"))
+          .sorted(Comparator.comparing(p -> Boolean.TRUE.equals(p.get("lifetime")))).toList();
         if (packs.isEmpty()) throw error(
           409,
           "没有可用的深挖次数，请先获取训练包"
@@ -148,18 +180,15 @@ public class TrainingService {
         var sourceOrder = s.one("SELECT * FROM purchase_orders WHERE id=?", pack.get("order_id"));
         payments.requireScope(sourceOrder);
         if (!"PAID".equals(sourceOrder.get("status"))) throw error(409,"该订单需要支付复核，暂不能使用复测权益");
-        if (!parent.equals(pack.get("deep_training_id"))) throw error(
-          409,
-          "训练包不属于此轮深挖"
-        );
         var entry = retestEntry(user, p);
         if (
           Set.of("CONTINUE", "COMPLETED").contains(entry.get("state"))
         ) return get(user, str(entry, "trainingId"));
-        if (Boolean.TRUE.equals(pack.get("retest_used"))) throw error(
-          409,
-          "此轮复测次数已使用"
-        );
+        if (!PaymentService.available(pack, "RETEST") ||
+          (PaymentService.legacy(pack) && !parent.equals(pack.get("deep_training_id")))) {
+          pack = sharedFunding(user);
+          if (pack == null) throw error(409, "没有可用的复测次数，请先获取训练套餐");
+        }
         parentBody = s.decode(p.get("body"));
       }
       if (!Boolean.TRUE.equals(project.get("factsConfirmed"))) throw error(
@@ -211,7 +240,10 @@ public class TrainingService {
         s.encode(body),
         now()
       );
-      if (kind.equals("DEEP")) s.db.update(
+      if (!PaymentService.legacy(pack)) s.db.update(
+        "UPDATE training_packages SET training_used=training_used+1 WHERE id=?", packageId
+      );
+      else if (kind.equals("DEEP")) s.db.update(
         "UPDATE training_packages SET deep_used=TRUE,deep_training_id=? WHERE id=?",
         id,
         packageId
@@ -419,7 +451,11 @@ public class TrainingService {
       );
       String packageId = str(r, "package_id"),
         field = "DEEP".equals(r.get("kind")) ? "deep_used" : "retest_used";
-      s.db.update(
+      var pack = s.one("SELECT * FROM training_packages WHERE id=? AND user_id=?", packageId, user);
+      if (!PaymentService.legacy(pack)) s.db.update(
+        "UPDATE training_packages SET training_used=training_used-1 WHERE id=? AND training_used>0", packageId
+      );
+      else s.db.update(
         "UPDATE training_packages SET " + field + "=FALSE WHERE id=?",
         packageId
       );

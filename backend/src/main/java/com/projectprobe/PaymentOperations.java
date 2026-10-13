@@ -159,7 +159,8 @@ public class PaymentOperations {
         );
         if (
           Boolean.TRUE.equals(pack.get("deep_used")) ||
-          Boolean.TRUE.equals(pack.get("retest_used"))
+          Boolean.TRUE.equals(pack.get("retest_used")) ||
+          ((Number) pack.get("training_used")).longValue() > 0
         ) throw error(409, "训练包已使用，需要人工处理退款");
         String requestNo = "REFUND_" + id.replace("-", "");
         s.db.update(

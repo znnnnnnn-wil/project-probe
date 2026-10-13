@@ -64,6 +64,13 @@ export type Training = {
   error?: string;
   interviewFacts: Fact[];
   packageId: string;
+  planVersion?: number;
+  reportPlan?: {
+    taskIndex: number;
+    done: boolean;
+    note: string;
+    updatedAt: number;
+  }[];
   retestEntry?: {
     state: "AVAILABLE" | "CONTINUE" | "COMPLETED" | "UNAVAILABLE";
     trainingId?: string;
@@ -83,18 +90,46 @@ export type Order = {
   query_status?: string;
   query_error?: string;
   can_operate?: boolean;
+  product_code?: string;
+  product_name?: string;
+  training_limit?: number;
+  lifetime?: boolean;
 };
 export type Package = {
   id: string;
+  order_id?: string;
   deep_used: boolean;
   retest_used: boolean;
   deep_training_id?: string;
+  product_code?: string;
+  training_limit?: number;
+  training_used?: number;
+  lifetime?: boolean;
+};
+export type Product = {
+  code: string;
+  name: string;
+  amountCents: number;
+  description: string;
+  trainingLimit: number;
+  lifetime: boolean;
+};
+export type Quota = {
+  unlimited: boolean;
+  sharedRemaining: number;
+  legacyDeepRemaining: number;
+  legacyRetestRemaining: number;
+  deepAvailable: number;
+  retestAvailable: number;
 };
 export type Shop = {
   mode: string;
   configured: boolean;
+  operationsEnabled?: boolean;
   configurationIssues?: string[];
   orders: Order[];
   packages: Package[];
   product: { name: string; amountCents: number; description: string };
+  products?: Product[];
+  quota?: Quota;
 };
