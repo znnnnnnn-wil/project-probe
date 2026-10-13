@@ -11,7 +11,6 @@ import {
   Check,
   ChevronRight,
   ShieldCheck,
-  BookOpen,
   LogOut,
   Menu,
   X,
@@ -21,11 +20,19 @@ import {
   Sparkles,
   Target,
   CreditCard,
+  Download,
+  Printer,
+  ChevronDown,
 } from "lucide-react";
 import { api, ApiError, go, emptyProject, demoProject } from "./api";
 import type { Project, Training, Shop, Fact, Report, Order } from "./types";
 import { paymentLabel, submitPaymentForm, orderLabel } from "./payment";
 import "./style.css";
+import { Workspace, purchaseFrom, purchaseProject } from "./workspace";
+import { downloadReport } from "./report-export";
+import { trainingQuota } from "./quota";
+import { ResumeImport } from "./resume-import";
+import { VoiceInput } from "./voice-input";
 
 const sourceLabel: Record<string, string> = {
   USER_PROVIDED: "材料提供",
@@ -76,6 +83,7 @@ function App() {
   const [ready, setReady] = useState(false);
   const [config, setConfig] = useState<{
     modelMode: string;
+    modelName?: string;
     paymentMode: string;
     paymentConfigured: boolean;
   } | null>(null);
@@ -119,6 +127,19 @@ function App() {
   }, []);
   const props = { run, busy };
   const nav = path.split("/")[1];
+  useEffect(() => {
+    if (
+      ready &&
+      !user &&
+      path !== "/" &&
+      path !== "/login" &&
+      /^\/(projects|trainings|report|shop|history|payment-return)(\/|$)/.test(
+        path,
+      )
+    ) {
+      sessionStorage.setItem("auth:return", path);
+    }
+  }, [path, ready, user]);
   return (
     <>
       <header>
@@ -136,7 +157,10 @@ function App() {
           {menu ? <X /> : <Menu />}
         </button>
         <nav className={menu ? "open" : ""}>
-          <a className={nav === "projects" ? "selected" : ""} href="#/projects">
+          <a
+            className={nav === "projects" || (user && !nav) ? "selected" : ""}
+            href="#/projects"
+          >
             我的项目
           </a>
           <a className={nav === "history" ? "selected" : ""} href="#/history">
@@ -172,12 +196,7 @@ function App() {
         </div>
       </header>
       <div className="mode-strip">
-        <span className="status-dot" />
-        {config
-          ? config.modelMode === "demo"
-            ? "当前为演示模式 · 规则生成内容，不代表真实 AI 评估"
-            : "AI 模型已启用 · 请先移除材料中的个人信息与密钥"
-          : "正在连接服务…"}
+        {config?.modelMode === "demo" && <span>规则演示 · 非 AI 技术评估</span>}
         <span className="strip-right">
           {config?.paymentMode === "mock"
             ? "开发模拟支付 · 不产生真实扣款"
@@ -201,25 +220,36 @@ function App() {
         </div>
       )}
       <main>
-        {path === "/" ? (
-          <Home onStart={() => go(user ? "/projects" : "/login")} />
-        ) : !ready ? (
+        {!ready ? (
           <Loading />
+        ) : path === "/" && !user ? (
+          <Home
+            onStart={() => {
+              sessionStorage.setItem("auth:return", "/projects/new");
+              go("/login");
+            }}
+          />
         ) : !user || path === "/login" ? (
           <Login
             {...props}
             onLogin={(u) => {
               setUser(u);
+              const next = sessionStorage.getItem("auth:return") || "/projects";
+              sessionStorage.removeItem("auth:return");
               go(
                 location.pathname === "/payment-return"
                   ? "/payment-return"
-                  : "/projects",
+                  : /^\/(projects|trainings|report|shop|history)(\/|$)/.test(
+                        next,
+                      )
+                    ? next
+                    : "/projects",
               );
             }}
           />
-        ) : nav === "projects" ? (
-          path === "/projects" ? (
-            <Projects {...props} />
+        ) : path === "/" || nav === "projects" ? (
+          path === "/" || path === "/projects" ? (
+            <Workspace {...props} />
           ) : (
             <Editor key={path} id={path.split("/")[2]} {...props} />
           )
@@ -288,120 +318,133 @@ function Empty({
   );
 }
 function Home({ onStart }: { onStart: () => void }) {
+  const [sampleAnswer, setSampleAnswer] = useState("");
+  const [preview, setPreview] = useState(false);
   return (
-    <>
-      <section className="hero">
-        <div className="hero-copy">
-          <div className="eyebrow">
-            <span /> 为 Java 后端实习面试而设计
-          </div>
-          <h1>
-            项目是你做的。
-            <br />
-            下一问，<span>也能讲明白。</span>
-          </h1>
-          <p className="lead">
-            从一段真实项目经历出发，练习连续技术追问。
-            <br />
-            找到讲不清的地方，补齐理解，再试一次。
-          </p>
-          <div className="hero-actions">
-            <Button onClick={onStart}>
-              开始项目练习 <ArrowUpRight size={18} />
-            </Button>
-            <a href="#/history" className="text-link">
-              继续上次训练 <ArrowRight size={15} />
-            </a>
-          </div>
-          <div className="hero-note">
-            <ShieldCheck size={15} />{" "}
-            材料不足，只标记待补充，不轻率判断你的经历。
-          </div>
-        </div>
-        <div className="preview-card">
-          <div className="preview-top">
-            <span>
-              <span className="status-dot" /> 项目深挖中
-            </span>
-            <span>02 / 05</span>
-          </div>
-          <div className="preview-project">
-            <Layers size={15} /> 校园自习室预约系统 <small>合成示例</small>
-          </div>
-          <div className="chat you">
-            <span>你的回答</span>
-            <p>我在写入预约前先检查座位是否空闲，再保存预约记录。</p>
-          </div>
-          <div className="chat interviewer">
-            <span>
-              <Sparkles size={14} /> 追问官
-            </span>
+    <section className="page sample-page">
+      <PageHead
+        eyebrow="Java 后端 · 项目面试训练"
+        title="项目追问官"
+        text="从你亲自实现的项目出发，练清楚细节、取舍与验证。"
+        action={
+          <Button onClick={onStart}>
+            开始项目练习
+            <ArrowRight size={16} />
+          </Button>
+        }
+      />
+      <div className="sample-layout">
+        <aside className="sample-project">
+          <FolderOpen size={25} />
+          <h2>校园自习室预约系统</h2>
+          <span className="badge">合成体验项目</span>
+          <dl>
+            <dt>技术栈</dt>
+            <dd>Java / Spring Boot / PostgreSQL</dd>
+            <dt>个人职责</dt>
+            <dd>预约创建接口、数据库约束与集成测试</dd>
+            <dt>当前实现</dt>
+            <dd>先查询座位是否空闲，再写入预约记录。</dd>
+          </dl>
+          <div className="sample-boundary">
+            <ShieldCheck size={17} />
             <p>
-              如果两个请求同时查到“空闲”，你的实现如何保证只有一个人预约成功？
+              此处为固定场景体验，不调用模型，不消耗次数。真实项目训练需登录并核对材料。
             </p>
           </div>
-          <div className="preview-bottom">
-            <span>追问依据</span> 你刚才提到的“检查后写入”
-            <ArrowUpRight size={15} />
+        </aside>
+        <div className="sample-practice">
+          <div className="question-label">
+            <span className="brand-icon">
+              <MessageSquare size={17} />
+            </span>
+            追问官<span>并发边界</span>
           </div>
-          <div className="floating-note">
-            <Check size={16} /> 从你的回答出发
-          </div>
+          <h2>两个请求同时查到座位“空闲”，怎样保证只有一个预约成功？</h2>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              setPreview(true);
+            }}
+          >
+            <label>
+              试着讲清楚你的实现
+              <textarea
+                aria-label="体验回答"
+                rows={6}
+                maxLength={2000}
+                value={sampleAnswer}
+                onChange={(e) => {
+                  setSampleAnswer(e.target.value);
+                  setPreview(false);
+                }}
+                placeholder="你的处理顺序、约束所在位置、冲突返回，以及验证方式…"
+                required
+              />
+            </label>
+            <div className="answer-bottom">
+              <small>{sampleAnswer.length}/2000</small>
+              <Button type="submit" disabled={!sampleAnswer.trim()}>
+                查看复盘角度
+                <ArrowRight size={16} />
+              </Button>
+            </div>
+          </form>
+          {preview && (
+            <div className="sample-feedback" role="status">
+              <h3>
+                <Target size={18} /> 这个场景值得继续解释的地方
+              </h3>
+              <ul>
+                <li>检查与写入之间存在时间窗口，最终约束由谁保证？</li>
+                <li>两个实例同时写入时，冲突如何返回给调用方？</li>
+                <li>怎样构造并发输入，核对数据库中最终的预约数量？</li>
+              </ul>
+              <p>以上是固定场景的复盘角度，不是对你回答的 AI 评分。</p>
+              <Button secondary onClick={onStart}>
+                用我的项目开始训练
+                <ArrowRight size={16} />
+              </Button>
+            </div>
+          )}
         </div>
-      </section>
-      <section className="steps">
+      </div>
+      <section className="sample-outcomes">
         <div>
-          <span className="section-kicker">不是背答案，是理解自己的项目</span>
-          <h2>把一次练习，变成一次进步。</h2>
+          <FileText size={20} />
+          <h3>有依据的复盘</h3>
+          <p>保留原问答与材料引用，定位需要补充的解释。</p>
         </div>
-        <div className="step-grid">
-          {[
-            {
-              i: "01",
-              icon: <FolderOpen />,
-              title: "放进真实材料",
-              text: "项目背景、个人职责、关键实现。先确认事实，再开始提问。",
-            },
-            {
-              i: "02",
-              icon: <MessageSquare />,
-              title: "沿着回答往下问",
-              text: "实现细节、方案取舍、异常边界。每次只聚焦一个问题。",
-            },
-            {
-              i: "03",
-              icon: <FileText />,
-              title: "带着依据去复盘",
-              text: "对照原回答，看到哪里清晰、哪里缺少解释，以及下一步补什么。",
-            },
-            {
-              i: "04",
-              icon: <RefreshCw />,
-              title: "换个场景再试",
-              text: "补充材料后，用变化的条件复测薄弱点，查看前后回答。",
-            },
-          ].map((s) => (
-            <article key={s.i}>
-              <div className="step-top">
-                {s.icon}
-                <span>{s.i}</span>
-              </div>
-              <h3>{s.title}</h3>
-              <p>{s.text}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-      <section className="bottom-cta">
         <div>
-          <h2>不必准备完美，先把项目放进来。</h2>
-          <p>支持简历项目经历、README 和脱敏代码片段。第一版采用文字交互。</p>
+          <Target size={20} />
+          <h3>明确的补充任务</h3>
+          <p>记录实现和验证笔记，再带着补充内容练习。</p>
         </div>
-        <Button onClick={onStart}>
-          创建我的项目 <Plus size={18} />
-        </Button>
+        <div>
+          <RefreshCw size={20} />
+          <h3>变化条件的复测</h3>
+          <p>回到同一项目的薄弱点，对照两轮回答。</p>
+        </div>
       </section>
-    </>
+      <section className="sample-report-example">
+        <div className="section-heading">
+          <h2>一份有依据的复盘</h2>
+          <span>合成项目 · 真实模型输出示例</span>
+        </div>
+        <figure>
+          <img
+            src="/report-example.png"
+            alt="合成预约项目的真实模型复盘，包含原回答证据与具体补充任务"
+            loading="lazy"
+            width="872"
+            height="524"
+          />
+          <figcaption>
+            来自已验收的合成项目训练。实际反馈取决于你的材料与回答，不保证面试结果。
+          </figcaption>
+        </figure>
+      </section>
+    </section>
   );
 }
 function Login({
@@ -481,68 +524,7 @@ function Login({
     </section>
   );
 }
-function Projects({ run, busy }: Actions) {
-  const [items, setItems] = useState<Project[] | null>(null);
-  useEffect(() => {
-    run(async () => setItems(await api("/projects")));
-  }, [run]);
-  return (
-    <section className="page">
-      <PageHead
-        eyebrow="我的工作台"
-        title="从一个真实项目开始"
-        text="把做过的事理清楚，再把它讲清楚。"
-        action={
-          <Button onClick={() => go("/projects/new")}>
-            <Plus size={17} /> 新建项目
-          </Button>
-        }
-      />
-      {items === null ? (
-        <Loading />
-      ) : items.length === 0 ? (
-        <Empty
-          title="还没有项目档案"
-          text="粘贴一段项目经历，或使用合成示例体验完整流程。"
-          action={() => go("/projects/new")}
-        />
-      ) : (
-        <div className="project-grid">
-          {items.map((p) => (
-            <article className="project-card" key={p.id}>
-              <div className="card-icon">
-                <FolderOpen size={23} />
-              </div>
-              <span className="badge">
-                {p.factsConfirmed ? "事实已核对" : "待核对事实"}
-              </span>
-              <h2>{p.name}</h2>
-              <p>{p.background || "尚未补充项目背景"}</p>
-              <div className="tags">
-                {p.stack
-                  .split(/[,，/]/)
-                  .slice(0, 4)
-                  .map((t, i) => (
-                    <span key={i}>{t.trim()}</span>
-                  ))}
-              </div>
-              <a href={"#/projects/" + p.id}>
-                整理档案与开始训练 <ArrowUpRight size={17} />
-              </a>
-            </article>
-          ))}
-        </div>
-      )}
-      <div className="subtle-note">
-        <BookOpen size={18} />
-        <span>
-          首次体验可在档案页载入合成项目，再前往训练包页面获取模拟权益。
-          {busy ? " 正在同步…" : ""}
-        </span>
-      </div>
-    </section>
-  );
-}
+
 function PageHead({
   eyebrow,
   title,
@@ -591,15 +573,75 @@ const fields: [keyof Project, string, string][] = [
   ],
 ];
 function Editor({ id, run, busy }: Actions & { id: string }) {
+  const [importBusy, setImportBusy] = useState(false);
+  busy = busy || importBusy;
   const [p, setP] = useState<Project>({ ...emptyProject });
   const [loaded, setLoaded] = useState(id === "new");
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState<Training[]>([]);
   const [startKey] = useState(crypto.randomUUID());
+  const [startError, setStartError] = useState("");
+  const [starting, setStarting] = useState(false);
+  const [step, setStep] = useState<"materials" | "facts">("materials");
+  const [shop, setShop] = useState<Shop | null>(null);
+  const [draftNotice, setDraftNotice] = useState("");
+  const [factsDirty, setFactsDirty] = useState(false);
+  const draftKey = "project-draft:" + id;
+  const factDraftKey = "fact-draft:" + id;
+  const restore = (project: Project) => {
+    const raw = sessionStorage.getItem(draftKey);
+    if (raw)
+      try {
+        const draft = JSON.parse(raw) as Project;
+        if (
+          draft.version === project.version &&
+          typeof draft.name === "string" &&
+          typeof draft.responsibility === "string"
+        ) {
+          setP({ ...project, ...draft });
+          setDirty(true);
+          setDraftNotice("已恢复此标签页未保存的材料");
+          return;
+        }
+        setDraftNotice("材料已在其他页面更新，旧草稿未覆盖新版本");
+      } catch {
+        sessionStorage.removeItem(draftKey);
+      }
+    const factRaw = sessionStorage.getItem(factDraftKey);
+    if (factRaw)
+      try {
+        const draft = JSON.parse(factRaw) as {
+          version?: number;
+          facts: Fact[];
+        };
+        if (
+          draft.version === project.version &&
+          Array.isArray(draft.facts) &&
+          draft.facts.length === project.facts.length &&
+          draft.facts.every(
+            (fact, index) =>
+              fact.id === project.facts[index].id &&
+              typeof fact.text === "string" &&
+              typeof fact.confirmed === "boolean",
+          )
+        ) {
+          setP({ ...project, facts: draft.facts, factsConfirmed: false });
+          setFactsDirty(true);
+          setStep("facts");
+          setDraftNotice("已恢复尚未保存的事实核对");
+          return;
+        }
+        sessionStorage.removeItem(factDraftKey);
+      } catch {
+        sessionStorage.removeItem(factDraftKey);
+      }
+    setP(project);
+  };
   useEffect(() => {
+    if (id === "new") restore({ ...emptyProject });
     if (id !== "new")
       run(async () => {
-        setP(await api("/projects/" + id));
+        restore(await api("/projects/" + id));
         setHistory(
           (await api<Training[]>("/trainings")).filter(
             (t) => t.project.id === id,
@@ -607,7 +649,29 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
         );
         setLoaded(true);
       });
+    api<Shop>("/shop")
+      .then(setShop)
+      .catch(() => {});
   }, [id, run]);
+  useEffect(() => {
+    if (dirty) sessionStorage.setItem(draftKey, JSON.stringify(p));
+    const warn = (event: BeforeUnloadEvent) => {
+      if (dirty || factsDirty) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [p, dirty, factsDirty, draftKey]);
+  const editFacts = (facts: Fact[]) => {
+    setP({ ...p, facts, factsConfirmed: false });
+    setFactsDirty(true);
+    sessionStorage.setItem(
+      factDraftKey,
+      JSON.stringify({ version: p.version, facts }),
+    );
+  };
   const save = () =>
     run(async () => {
       const result = await api<Project>(
@@ -617,18 +681,38 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
       );
       setP(result);
       setDirty(false);
+      sessionStorage.removeItem(draftKey);
+      sessionStorage.removeItem(factDraftKey);
+      setFactsDirty(false);
+      setDraftNotice("材料已保存");
       if (id === "new") go("/projects/" + result.id);
     });
   const start = (parentId?: string) =>
     run(async () => {
-      const t = await api<Training>("/trainings", "POST", {
-        projectId: id,
-        parentId,
-        requestKey: parentId ? startKey + "-retest-" + parentId : startKey,
-      });
-      go((t.status === "COMPLETED" ? "/report/" : "/trainings/") + t.id);
+      setStartError("");
+      setStarting(!parentId);
+      try {
+        if (!parentId) setShop(await api<Shop>("/shop"));
+        const t = await api<Training>("/trainings", "POST", {
+          projectId: id,
+          parentId,
+          requestKey: parentId ? startKey + "-retest-" + parentId : startKey,
+        });
+        go((t.status === "COMPLETED" ? "/report/" : "/trainings/") + t.id);
+      } catch (e) {
+        if (!parentId)
+          setStartError(e instanceof Error ? e.message : "开始失败，请重试");
+        throw e;
+      } finally {
+        setStarting(false);
+      }
     });
   if (!loaded) return <Loading />;
+  const balance = trainingQuota(shop);
+  const quota = shop ? balance.deepAvailable : undefined;
+  const ongoing = history.filter(
+    (t) => !["COMPLETED", "REFUNDED"].includes(t.status),
+  );
   return (
     <section className="page">
       <PageHead
