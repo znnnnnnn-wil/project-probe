@@ -46,18 +46,23 @@ assert(
       previous.username?.startsWith("live-synthetic-")),
   "恢复记录须为合成百炼验收",
 );
-const env = Object.fromEntries(
-  (await readFile(path.join(root, ".env"), "utf8"))
-    .split(/\r?\n/)
-    .filter((v) => /^MODEL_\w+=/.test(v))
-    .map((v) => [v.slice(0, v.indexOf("=")), v.slice(v.indexOf("=") + 1)]),
-);
+const env = {
+  ...Object.fromEntries(
+    (await readFile(path.join(root, ".env"), "utf8"))
+      .split(/\r?\n/)
+      .filter((v) => /^MODEL_\w+=/.test(v))
+      .map((v) => [v.slice(0, v.indexOf("=")), v.slice(v.indexOf("=") + 1)]),
+  ),
+  ...Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => /^MODEL_\w+$/.test(name)),
+  ),
+};
 assert(
   env.MODEL_API_KEY &&
     env.MODEL_BASE_URL ===
       "https://dashscope.aliyuncs.com/compatible-mode/v1" &&
-    env.MODEL_NAME === "qwen3.8-max-0902",
-  "仅验收已配置的百炼 qwen3.8-max-0902，不自动切换模型或付费端点",
+    ["qwen3.8-max-0902", "deepseek-v4.1-flash"].includes(env.MODEL_NAME),
+  "仅验收已确认免费额度的百炼候选模型，不自动切换模型或付费端点",
 );
 assert.equal(
   env.MODEL_FREE_QUOTA_CONFIRMED_MODEL,
@@ -286,7 +291,7 @@ try {
     retest = await api("/trainings/" + refreshed.retestEntry.trainingId);
     if (retest.status === "FAILED") {
       retest = await api("/trainings/" + retest.id + "/retry", "POST", {});
-      pass("已有失败复测保留原回答，直接重试恢复报告且不重复扣次");
+      pass("已有失败复测保留原回答，直接重试恢复生成且不重复扣次");
     } else if (
       retest.status === "ACTIVE" &&
       retest.turns.some((t) => t.answer)
@@ -333,6 +338,9 @@ try {
     pass(
       "真实复测首题关联上轮薄弱点和修订材料，重复开始不创建训练或再次调用模型",
     );
+  }
+  if (retest.status === "ACTIVE") {
+    assert(!retest.turns.some((t) => t.answer));
     retest = await api("/trainings/" + retest.id + "/answer", "POST", {
       turnId: retest.turns[0].id,
       answer:
