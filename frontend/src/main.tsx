@@ -714,19 +714,50 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
     (t) => !["COMPLETED", "REFUNDED"].includes(t.status),
   );
   return (
-    <section className="page">
+    <section className="page editor-page">
       <PageHead
         eyebrow="项目档案"
         title={id === "new" ? "整理你的项目经历" : p.name}
-        text="保存材料 → 核对事实 → 开始练习。修改材料会保留历史版本，并需要重新核对事实。"
+        text={
+          "Java 后端项目面试 · " +
+          (id === "new" ? "新建档案" : "材料版本 " + p.version)
+        }
         action={
           <Button secondary onClick={() => go("/projects")}>
             返回项目列表
           </Button>
         }
       />
+      <div className="editor-steps" aria-label="项目准备步骤">
+        <button
+          aria-label="项目材料"
+          aria-pressed={step === "materials"}
+          disabled={factsDirty}
+          onClick={() => setStep("materials")}
+        >
+          <span>{id !== "new" && !dirty ? <Check size={14} /> : "1"}</span>
+          项目材料
+        </button>
+        <button
+          aria-label="事实核对"
+          aria-pressed={step === "facts"}
+          disabled={id === "new"}
+          onClick={() => setStep("facts")}
+        >
+          <span>{p.factsConfirmed && !dirty ? <Check size={14} /> : "2"}</span>
+          事实核对
+        </button>
+        <div>
+          <span>3</span>深挖与复测
+        </div>
+      </div>
+      {draftNotice && (
+        <p className="save-notice" role="status">
+          {draftNotice}
+        </p>
+      )}
       <div className="editor-layout">
-        <div className="panel">
+        <div className="materials-panel" hidden={step !== "materials"}>
           <div className="panel-heading">
             <h2>项目材料</h2>
             {id === "new" && (
@@ -741,6 +772,34 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
               </button>
             )}
           </div>
+          <p className="material-privacy">
+            <ShieldCheck size={15} />
+            材料用于 AI
+            提取与追问，并保存在服务端。请移除密钥、个人身份信息和无权提供的代码。
+          </p>
+          <ResumeImport
+            disabled={busy || factsDirty}
+            onBusy={setImportBusy}
+            onSelect={(candidate) => {
+              if (
+                (p.name.trim() || p.responsibility.trim() || p.resume.trim()) &&
+                !window.confirm(
+                  "将用选中的简历项目替换当前材料草稿，已保存的服务器记录不会立即修改。是否继续？",
+                )
+              )
+                return;
+              setP({
+                ...p,
+                ...candidate,
+                targetRole: candidate.targetRole || p.targetRole,
+                materials: "",
+                facts: [],
+                factsConfirmed: false,
+              });
+              setDirty(true);
+              setDraftNotice("已填入简历项目，请核对后保存");
+            }}
+          />
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -789,32 +848,53 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
               </Button>
             </div>
           </form>
+          {id !== "new" && (
+            <div className="material-next">
+              <span>
+                {dirty ? "保存修改后再核对事实" : "材料已准备，可进入事实核对"}
+              </span>
+              <Button
+                secondary
+                disabled={busy || dirty}
+                onClick={() => setStep("facts")}
+              >
+                前往事实核对
+                <ArrowRight size={16} />
+              </Button>
+            </div>
+          )}
         </div>
-        <aside>
-          <div className="panel facts-panel">
-            <div className="section-kicker">开始前，先确认</div>
-            <h2>项目事实清单</h2>
-            <p>
-              区分原始材料、推断与待确认信息。核对不意味着每条推断都已被证实。
-            </p>
-            {id === "new" ? (
-              <div className="mini-empty">保存档案后，提取需要核对的事实。</div>
-            ) : (
-              <>
-                <Button
-                  secondary
-                  disabled={busy || dirty}
-                  onClick={() =>
-                    run(async () =>
-                      setP(await api("/projects/" + id + "/extract", "POST")),
-                    )
-                  }
-                >
-                  {p.facts.length ? "读取已提取事实" : "提取项目事实"}
-                </Button>
-                <small>
-                  相同材料复用已提取结果；更新材料并保存后可重新提取。
-                </small>
+        <div className="facts-panel" hidden={step !== "facts"}>
+          <div className="section-kicker">开始前，先确认</div>
+          <h2>项目事实清单</h2>
+          <p>
+            区分原始材料、推断与待确认信息。核对不意味着每条推断都已被证实。
+          </p>
+          {id === "new" ? (
+            <div className="mini-empty">保存档案后，提取需要核对的事实。</div>
+          ) : (
+            <>
+              <Button
+                secondary
+                disabled={busy || dirty || factsDirty}
+                onClick={() =>
+                  run(async () => {
+                    setP(await api("/projects/" + id + "/extract", "POST"));
+                    setDraftNotice("");
+                  })
+                }
+              >
+                {p.facts.length ? "读取已提取事实" : "提取项目事实"}
+              </Button>
+              <small>
+                相同材料复用已提取结果；更新材料并保存后可重新提取。
+              </small>
+              {factsDirty && (
+                <p className="save-notice">
+                  核对修改尚未保存。未确认的条目会继续保留待确认状态。
+                </p>
+              )}
+              <div className="fact-review-list">
                 {p.facts.map((f, index) => (
                   <div className="fact" key={f.id}>
                     <span className={"badge source-" + f.source}>
@@ -825,73 +905,179 @@ function Editor({ id, run, busy }: Actions & { id: string }) {
                       rows={3}
                       value={f.text}
                       onChange={(e) =>
-                        setP({
-                          ...p,
-                          factsConfirmed: false,
-                          facts: p.facts.map((v, i) =>
+                        editFacts(
+                          p.facts.map((v, i) =>
                             i === index ? { ...v, text: e.target.value } : v,
                           ),
-                        })
+                        )
                       }
                     />
-                    {f.quote && <small>原材料依据：{f.quote}</small>}
+                    {f.quote && (
+                      <details className="fact-quote">
+                        <summary>原材料依据</summary>
+                        <p>{f.quote}</p>
+                      </details>
+                    )}
                     <label className="checkbox">
                       <input
                         type="checkbox"
                         checked={f.confirmed}
                         onChange={(e) =>
-                          setP({
-                            ...p,
-                            factsConfirmed: false,
-                            facts: p.facts.map((v, i) =>
+                          editFacts(
+                            p.facts.map((v, i) =>
                               i === index
                                 ? { ...v, confirmed: e.target.checked }
                                 : v,
                             ),
-                          })
+                          )
                         }
                       />{" "}
                       我能确认这一条说明
                     </label>
                   </div>
                 ))}
-                {p.facts.length > 0 && (
-                  <Button
-                    secondary
-                    disabled={busy || dirty}
-                    onClick={() =>
-                      run(async () =>
-                        setP(
-                          await api("/projects/" + id + "/confirm", "POST", {
-                            version: p.version,
-                            facts: p.facts,
-                          }),
-                        ),
-                      )
-                    }
-                  >
-                    {p.factsConfirmed
-                      ? "已核对 · 可重新保存核对"
-                      : "保存核对结果"}
-                  </Button>
+              </div>
+              {p.facts.length > 0 && (
+                <Button
+                  secondary
+                  disabled={busy || dirty}
+                  onClick={() =>
+                    run(async () => {
+                      setP(
+                        await api("/projects/" + id + "/confirm", "POST", {
+                          version: p.version,
+                          facts: p.facts,
+                        }),
+                      );
+                      sessionStorage.removeItem(factDraftKey);
+                      setFactsDirty(false);
+                    })
+                  }
+                >
+                  {p.factsConfirmed
+                    ? "已核对 · 可重新保存核对"
+                    : "保存核对结果"}
+                </Button>
+              )}
+              {factsDirty && (
+                <button
+                  className="text-link discard-facts"
+                  disabled={busy || dirty}
+                  onClick={() =>
+                    run(async () => {
+                      const value = await api<Project>("/projects/" + id);
+                      setP(value);
+                      setFactsDirty(false);
+                      sessionStorage.removeItem(factDraftKey);
+                      setDraftNotice("已恢复已保存的核对结果");
+                    })
+                  }
+                >
+                  放弃本次核对修改
+                </button>
+              )}
+            </>
+          )}
+        </div>
+        <aside className="training-aside">
+          <div className="training-readiness">
+            <h2>本次训练</h2>
+            <ul className="readiness-list">
+              <li>
+                {id === "new" ? <Clock size={15} /> : <Check size={15} />}
+                {id === "new"
+                  ? "材料待保存"
+                  : dirty
+                    ? "材料有未保存修改"
+                    : "材料已保存"}
+              </li>
+              <li>
+                {p.factsConfirmed && !dirty ? (
+                  <Check size={15} />
+                ) : (
+                  <Clock size={15} />
                 )}
-                <div className="start-block">
-                  <Button
-                    disabled={busy || dirty || !p.factsConfirmed}
-                    onClick={() => start()}
-                  >
+                {p.factsConfirmed && !dirty ? "事实已核对" : "事实待核对"}
+              </li>
+              <li>
+                <CreditCard size={15} />
+                {balance.unlimited
+                  ? "永久套餐 · 不限次数"
+                  : quota === undefined
+                    ? "正在读取权益…"
+                    : `剩余 ${quota} 次可用深挖`}
+              </li>
+            </ul>
+            <div className="start-block">
+              <Button
+                disabled={busy || dirty || !p.factsConfirmed || id === "new"}
+                onClick={() => start()}
+              >
+                {starting ? (
+                  <>
+                    <LoaderCircle className="spin" size={16} /> 正在开始…
+                  </>
+                ) : (
+                  <>
                     开始项目深挖 <ArrowRight size={16} />
-                  </Button>
-                  <small>消耗 1 次深挖权益 · 默认 5 个回答</small>
-                  <a href="#/shop">查看训练包与剩余次数</a>
-                </div>
-              </>
+                  </>
+                )}
+              </Button>
+              {startError && <p className="action-error">{startError}</p>}
+              <small>
+                {balance.unlimited
+                  ? "永久权益 · 默认 5 个回答"
+                  : "消耗 1 次训练权益 · 默认 5 个回答"}
+              </small>
+              {quota === 0 && !balance.unlimited && (
+                <p className="quota-warning">
+                  暂无可用深挖次数。已有训练可继续，关联复测不需要再买一包。
+                </p>
+              )}
+              <a
+                href="#/shop"
+                onClick={(e) => {
+                  e.preventDefault();
+                  purchaseFrom(id === "new" ? undefined : id);
+                }}
+              >
+                查看训练包与剩余次数
+              </a>
+            </div>
+            {step === "materials" && id !== "new" && (
+              <Button
+                secondary
+                disabled={busy || dirty}
+                onClick={() => setStep("facts")}
+              >
+                核对项目事实
+                <ArrowRight size={15} />
+              </Button>
             )}
           </div>
+          {ongoing.map((t) => (
+            <a
+              className="resume-row editor-resume"
+              href={"#/trainings/" + t.id}
+              key={t.id}
+            >
+              <MessageSquare size={18} />
+              <div>
+                <strong>
+                  继续{t.kind === "RETEST" ? "专项复测" : "已有深挖"}
+                </strong>
+                <small>
+                  已保存 {t.turns.filter((v) => v.answer).length}/{t.maxTurns}{" "}
+                  个回答 · 不重复扣次
+                </small>
+              </div>
+              <ArrowRight size={15} />
+            </a>
+          ))}
           {history
             .filter((t) => t.kind === "DEEP" && t.status === "COMPLETED")
             .map((t) => (
-              <div className="panel retest-entry" key={t.id}>
+              <div className="retest-entry" key={t.id}>
                 <RefreshCw size={22} />
                 <h3>补充后，再测一次</h3>
                 <p>{t.report?.retestTopics.join(" · ")}</p>
@@ -986,6 +1172,7 @@ function History({ run }: Actions) {
   );
 }
 function Interview({ id, run, busy }: Actions & { id: string }) {
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const [t, setT] = useState<Training | null>(null);
   const [answer, setAnswer] = useState("");
   const load = useCallback(async () => {
@@ -1070,6 +1257,18 @@ function Interview({ id, run, busy }: Actions & { id: string }) {
             <p>已提交内容保存在服务端；未提交草稿仅保留在当前浏览器标签页。</p>
           </div>
           <a href="#/history">离开并稍后继续</a>
+          <details className="interview-materials">
+            <summary>本轮事实边界</summary>
+            {t.project.facts
+              .filter((f) => f.confirmed)
+              .slice(0, 6)
+              .map((f) => (
+                <p key={f.id}>
+                  <span className="badge">{sourceLabel[f.source]}</span>
+                  {f.text}
+                </p>
+              ))}
+          </details>
         </aside>
         <div>
           <div className="panel question-panel">
@@ -1085,12 +1284,25 @@ function Interview({ id, run, busy }: Actions & { id: string }) {
               <Layers size={14} /> 依据本次项目材料与已提交回答 ·{" "}
               {t.modelMode === "demo" ? "规则演示" : "AI 生成"}
             </div>
+            {t.kind === "RETEST" && (
+              <p className="focus-topic">
+                <Target size={14} /> 本轮复测：{t.focus}
+              </p>
+            )}
+            {t.turns.length > 1 && (
+              <details className="previous-answer">
+                <summary>上一问与我的回答</summary>
+                <strong>{t.turns[t.turns.length - 2].question}</strong>
+                <p>{t.turns[t.turns.length - 2].answer}</p>
+              </details>
+            )}
           </div>
           {t.status === "ACTIVE" && turn ? (
             <form
               className="panel answer-panel"
               onSubmit={(e) => {
                 e.preventDefault();
+                if (voiceBusy) return;
                 action("answer", { turnId: turn.id, answer });
               }}
             >
@@ -1113,17 +1325,51 @@ function Interview({ id, run, busy }: Actions & { id: string }) {
                   required
                 />
               </label>
+              <VoiceInput
+                key={turn.id}
+                trainingId={id}
+                turnId={turn.id}
+                disabled={busy}
+                remaining={6000 - answer.length - (answer.trim() ? 1 : 0)}
+                onBusy={setVoiceBusy}
+                onAppend={(text) => {
+                  const next = answer + (answer.trim() ? "\n" : "") + text;
+                  setAnswer(next);
+                  sessionStorage.setItem("draft:" + id + ":" + turn.id, next);
+                }}
+              />
               <div className="answer-bottom">
                 <span>{answer.length} / 6000</span>
-                <Button type="submit" disabled={busy || !answer.trim()}>
-                  提交并继续 <ArrowRight size={16} />
+                <Button
+                  type="submit"
+                  disabled={busy || voiceBusy || !answer.trim()}
+                >
+                  {busy ? (
+                    <>
+                      <LoaderCircle className="spin" size={16} />
+                      正在生成下一步…
+                    </>
+                  ) : (
+                    <>
+                      提交并继续 <ArrowRight size={16} />
+                    </>
+                  )}
                 </Button>
               </div>
               <button
                 type="button"
                 className="text-link"
-                disabled={busy}
-                onClick={() => action("finish")}
+                disabled={busy || voiceBusy || count === 0}
+                onClick={() => {
+                  if (
+                    answer.trim() &&
+                    !window.confirm(
+                      "当前草稿尚未提交。结束训练只使用已提交回答，是否继续？",
+                    )
+                  )
+                    return;
+                  action("finish");
+                }}
               >
                 结束训练并复盘（仅使用已提交回答）
               </button>
