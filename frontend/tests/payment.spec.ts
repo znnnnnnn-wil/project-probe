@@ -288,30 +288,219 @@ test("模拟返回页不请求支付宝、不自动模拟成功", async ({ page 
 
 test("支付 POST 表单安全重建，忽略返回脚本和事件属性", async ({ page }) => {
   const executed: string[] = [];
-  await page.exposeFunction("recordUnsafePaymentScript", () =>
-    executed.push("executed"),
-  );
+  await page
+    .context()
+    .exposeFunction("recordUnsafePaymentScript", () =>
+      executed.push("executed"),
+    );
   const f = await fixture(page, "sandbox");
   f.form(
     '<form method="post" action="https://openapi-sandbox.dl.alipaydev.com/gateway.do"><input type="hidden" name="biz_content" value="synthetic" onfocus="window.recordUnsafePaymentScript()"><input type="hidden" name="sign" value="synthetic-sign"></form><script>window.recordUnsafePaymentScript()</script>',
   );
   let method = "",
     data = "";
-  await page.route(
-    "https://openapi-sandbox.dl.alipaydev.com/gateway.do**",
-    async (route) => {
-      method = route.request().method();
-      data = route.request().postData() || "";
-      await route.fulfill({
-        contentType: "text/html; charset=utf-8",
-        body: "<p>合成支付网关，不是真实付款</p>",
-      });
-    },
-  );
+  await page
+    .context()
+    .route(
+      "https://openapi-sandbox.dl.alipaydev.com/gateway.do**",
+      async (route) => {
+        method = route.request().method();
+        data = route.request().postData() || "";
+        await route.fulfill({
+          contentType: "text/html; charset=utf-8",
+          body: "<p>合成支付网关，不是真实付款</p>",
+        });
+      },
+    );
   await page.goto("/#/shop");
+  const popupPromise = page.waitForEvent("popup");
   await page.getByRole("button", { name: "前往官方沙箱" }).click();
-  await expect(page.getByText("合成支付网关，不是真实付款")).toBeVisible();
+  const popup = await popupPromise;
+  await expect(popup.getByText("合成支付网关，不是真实付款")).toBeVisible();
+  await expect(page).toHaveURL(/#\/shop$/);
   expect(method).toBe("POST");
   expect(data).toContain("biz_content=synthetic");
   expect(executed).toEqual([]);
+});
+
+const gatewayForm =
+  '<form method="post" action="https://openapi-sandbox.dl.alipaydev.com/gateway.do"><input type="hidden" name="biz_content" value="synthetic"><input type="hidden" name="sign" value="synthetic-sign"></form>';
+async function automaticFixture(page: Page) {
+  const f = await fixture(page, "sandbox");
+  f.form(gatewayForm);
+  let creates = 0;
+  await page.route("**/api/orders", async (route) => {
+    creates++;
+    await route.fulfill({ json: f.order });
+  });
+  await page
+    .context()
+    .route(
+      "https://openapi-sandbox.dl.alipaydev.com/gateway.do**",
+      async (route) => {
+        expect(route.request().method()).toBe("POST");
+        expect(route.request().postData()).toContain("sign=synthetic-sign");
+        await route.fulfill({
+          contentType: "text/html; charset=utf-8",
+          body: "<p>合成二维码页</p>",
+        });
+      },
+    );
+  return { ...f, creates: () => creates };
+}
+
+for (const width of [1440, 390]) {
+  test(`创建订单自动打开收银台、通知确认后关闭并恢复原页 ${width}`, async ({
+    page,
+  }) => {
+    const f = await automaticFixture(page);
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/#/shop");
+    const popupPromise = page.waitForEvent("popup");
+    await page
+      .getByRole("button", { name: "创建沙箱订单", exact: true })
+      .click();
+    const popup = await popupPromise;
+    await expect(popup.getByText("合成二维码页")).toBeVisible();
+    await expect(page).toHaveURL(/#\/shop$/);
+    expect(await popup.evaluate(() => window.opener !== null)).toBe(true);
+    expect(f.creates()).toBe(1);
+    expect(f.calls.filter((call) => call.endsWith("/checkout"))).toHaveLength(
+      1,
+    );
+    await page.screenshot({
+      path: `test-results/payment-waiting-${width}.png`,
+      fullPage: true,
+    });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    f.order.status = "PAID";
+    await expect(
+      page.getByText("支付已确认，训练权益已到账。", { exact: true }),
+    ).toBeVisible({ timeout: 10000 });
+    await expect.poll(() => popup.isClosed()).toBe(true);
+    await expect(page.locator(".orders")).toContainText("已确认，权益已发放");
+    expect(f.calls.some((call) => call.endsWith("/mock-pay"))).toBe(false);
+  });
+}
+
+test("收银台被拦截时保留已创建订单，不静默跳走或重复创建", async ({ page }) => {
+  const f = await automaticFixture(page);
+  await page.addInitScript(() => {
+    window.open = () => null;
+  });
+  await page.goto("/#/shop");
+  await page.getByRole("button", { name: "创建沙箱订单", exact: true }).click();
+  await expect(
+    page.getByText(
+      "浏览器拦截了收银台窗口，订单已保留，请允许弹窗后点击付款重试。",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  expect(f.creates()).toBe(1);
+  expect(f.calls.some((call) => call.endsWith("/checkout"))).toBe(false);
+  await expect(
+    page.getByRole("button", { name: "前往官方沙箱", exact: true }),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/#\/shop$/);
+});
+
+test("查询失败不视为付款成功，手动关闭收银台后仍继续核对", async ({ page }) => {
+  const f = await automaticFixture(page);
+  f.fail(true);
+  await page.goto("/#/shop");
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "创建沙箱订单", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(popup.getByText("合成二维码页")).toBeVisible();
+  await expect
+    .poll(() => f.calls.filter((call) => call.endsWith("/sync")).length)
+    .toBe(1);
+  await expect(
+    page.getByText("支付已确认，训练权益已到账。", { exact: true }),
+  ).toHaveCount(0);
+  await popup.close();
+  f.order.status = "PAID";
+  await page.bringToFront();
+  await expect(
+    page.getByText("支付已确认，训练权益已到账。", { exact: true }),
+  ).toBeVisible({ timeout: 10000 });
+});
+
+test("官方返回页只在服务端确认后自动回到订单页", async ({ page }) => {
+  const f = await fixture(page, "sandbox");
+  await page.goto(
+    `/payment-return?probe_order=${id}&trade_status=TRADE_SUCCESS`,
+  );
+  await expect(
+    page.getByRole("heading", { name: "等待支付确认" }),
+  ).toBeVisible();
+  await page.waitForTimeout(1800);
+  await expect(page).toHaveURL(/payment-return/);
+  f.order.status = "PAID";
+  await page.getByRole("button", { name: "重新查询订单状态" }).click();
+  await expect(page).toHaveURL(/\/#\/shop$/, { timeout: 5000 });
+  await expect(page.locator(".orders")).toContainText("已确认，权益已发放");
+});
+
+test("没有通知时由服务端查询确认，付款后自动返回原项目", async ({ page }) => {
+  const f = await automaticFixture(page);
+  const projectId = "22222222-2222-4222-8222-222222222222";
+  await page.addInitScript(
+    (project) => sessionStorage.setItem("purchase:project", project),
+    projectId,
+  );
+  await page.route(`**/api/projects/${projectId}`, (route) =>
+    route.fulfill({
+      json: {
+        id: projectId,
+        name: "合成购买来源",
+        responsibility: "合成职责",
+        resume: "合成原文",
+        facts: [],
+        factsConfirmed: false,
+        version: 1,
+      },
+    }),
+  );
+  await page.route(
+    /\/api\/trainings(?:\?summary=true(?:&project=[^&]+)?)?$/,
+    (route) => route.fulfill({ json: [] }),
+  );
+  await page.route(`**/api/orders/${id}/sync`, async (route) => {
+    f.calls.push("POST /api/orders/" + id + "/sync");
+    f.order.status = "PAID";
+    await route.fulfill({ json: f.order });
+  });
+  await page.goto("/#/shop");
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "创建沙箱订单", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(page).toHaveURL(new RegExp("#/projects/" + projectId + "$"));
+  await expect.poll(() => popup.isClosed()).toBe(true);
+  expect(f.calls.filter((call) => call.endsWith("/sync"))).toHaveLength(1);
+  expect(f.creates()).toBe(1);
+});
+
+test("刷新原页面恢复待支付核对，不重建订单或重开收银台", async ({ page }) => {
+  const f = await automaticFixture(page);
+  await page.goto("/#/shop");
+  const popupPromise = page.waitForEvent("popup");
+  await page.getByRole("button", { name: "创建沙箱订单", exact: true }).click();
+  const popup = await popupPromise;
+  await expect(popup.getByText("合成二维码页")).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "创建沙箱订单", exact: true }),
+  ).toBeDisabled();
+  f.order.status = "PAID";
+  await expect(
+    page.getByText("支付已确认，训练权益已到账。", { exact: true }),
+  ).toBeVisible({ timeout: 10000 });
+  expect(f.creates()).toBe(1);
+  expect(f.calls.filter((call) => call.endsWith("/checkout"))).toHaveLength(1);
+  await popup.close();
 });
