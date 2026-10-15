@@ -3,6 +3,7 @@ import { api } from "./api";
 import { Button, PageHead } from "./ui";
 import type { Actions } from "./ui";
 import { DataControls } from "./privacy";
+import { UsageSummary } from "./usage-summary";
 
 export function Account({ run, busy }: Actions) {
   const [password, setPassword] = useState("");
@@ -25,6 +26,7 @@ export function Account({ run, busy }: Actions) {
       })}>修改密码并退出所有设备</Button>
     </div>
     <DataControls run={run} busy={busy} />
+    <UsageSummary />
   </section>;
 }
 

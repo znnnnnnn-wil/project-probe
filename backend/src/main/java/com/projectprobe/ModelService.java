@@ -23,6 +23,8 @@ public class ModelService {
 
   final Store s;
   final String mode, url, key, model, provider;
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  UsageMetrics usage;
   java.util.concurrent.Semaphore modelSlots =
     new java.util.concurrent.Semaphore(4);
 
@@ -167,6 +169,8 @@ public class ModelService {
       }
       if (response.body().length() > 200000) throw error(503, "模型响应过大");
       var root = s.json.readTree(response.body());
+      if (usage != null) usage.record(model, root.path("usage").path("prompt_tokens").asLong(-1),
+        root.path("usage").path("completion_tokens").asLong(-1), now() - started);
       log.info(
         "model_call provider={} model={} promptTokens={} completionTokens={} elapsedMs={}",
         provider,
