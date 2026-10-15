@@ -17,6 +17,7 @@ public class Api {
   final PaymentOperations paymentOperations;
   final InputService inputs;
   final TrainingSupport support;
+  final AnswerDrafts drafts;
 
   Api(
     Store s,
@@ -27,7 +28,8 @@ public class Api {
     ModelService model,
     PaymentOperations paymentOperations,
     InputService inputs,
-    TrainingSupport support
+    TrainingSupport support,
+    AnswerDrafts drafts
   ) {
     this.s = s;
     this.auth = auth;
@@ -38,6 +40,7 @@ public class Api {
     this.paymentOperations = paymentOperations;
     this.inputs = inputs;
     this.support = support;
+    this.drafts = drafts;
   }
 
   @GetMapping("/health")
@@ -211,6 +214,16 @@ public class Api {
     @RequestBody Map<String, Object> b
   ) {
     return trainings.answer(auth.user(r), id, b);
+  }
+
+  @GetMapping("/trainings/{id}/draft")
+  Object draft(HttpServletRequest r, @PathVariable String id) {
+    return drafts.read(auth.user(r), id);
+  }
+
+  @PutMapping("/trainings/{id}/draft")
+  Object saveDraft(HttpServletRequest r, @PathVariable String id, @RequestBody Map<String, Object> b) {
+    return drafts.save(auth.user(r), id, b);
   }
 
   @PostMapping("/trainings/{id}/finish")
