@@ -1,4 +1,4 @@
-"""Publish resume deduplication without changing runtime model/payment settings."""
+"""Publish source-backed AI resume extraction without changing runtime settings."""
 import getpass
 import hashlib
 import json
@@ -45,7 +45,7 @@ assert 'server_name 39.96.27.134;' in old_nginx and 'proxy_pass http://127.0.0.1
 new_nginx=(stage/'server-nginx.conf').read_text()
 assert 'client_max_body_size 7m;' in new_nginx and "media-src 'self' blob:" in new_nginx
 tag=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-backup=root/'releases'/('resume-dedup-'+tag)
+backup=root/'releases'/('resume-extraction-'+tag)
 backup.mkdir(mode=0o700)
 for name in ['app.jar','backend.env','server-nginx.conf']:
  shutil.copy2(root/name,backup/name);os.chmod(backup/name,0o600)
@@ -124,7 +124,7 @@ try:
     if code:
         raise RuntimeError('Release failed; diagnostic: ' + error[-1600:])
     result = json.loads(output)
-    output = ROOT / '.runtime/resume-dedup-acceptance'
+    output = ROOT / '.runtime/resume-extraction-acceptance'
     output.mkdir(parents=True, exist_ok=True)
     (output / 'release.json').write_text(json.dumps(result), encoding='utf-8')
     print(json.dumps(result))
