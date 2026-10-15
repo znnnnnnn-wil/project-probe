@@ -139,31 +139,34 @@ test("已返还复测显示可重新开始，未核对材料也可以继续已�
     page.getByRole("button", { name: "继续复测", exact: true }),
   ).toBeEnabled();
   // 返还状态的界面测试使用响应夹具；真实返还/重新预留由后端事务回归覆盖。
-  await page.route("**/api/trainings", async (route) => {
-    if (route.request().method() !== "GET") {
-      await route.continue();
-      return;
-    }
-    const response = await route.fetch();
-    const data: Training[] = await response.json();
-    await route.fulfill({
-      response,
-      json: data.map((t) =>
-        t.id === first.id
-          ? {
-              ...t,
-              retestEntry: {
-                state: "AVAILABLE",
-                returned: true,
-                packageId: retest.packageId,
-              },
-            }
-          : t.id === retest.id
-            ? { ...t, status: "REFUNDED" }
-            : t,
-      ),
-    });
-  });
+  await page.route(
+    /\/api\/trainings(?:\?summary=true(?:&project=[^&]+)?)?$/,
+    async (route) => {
+      if (route.request().method() !== "GET") {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      const data: Training[] = await response.json();
+      await route.fulfill({
+        response,
+        json: data.map((t) =>
+          t.id === first.id
+            ? {
+                ...t,
+                retestEntry: {
+                  state: "AVAILABLE",
+                  returned: true,
+                  packageId: retest.packageId,
+                },
+              }
+            : t.id === retest.id
+              ? { ...t, status: "REFUNDED" }
+              : t,
+        ),
+      });
+    },
+  );
   await page.reload();
   await expect(
     page.getByText("上次故障复测次数已返还，可以重新开始。"),

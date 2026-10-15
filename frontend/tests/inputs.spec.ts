@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { demoProject } from "../src/api";
+import { injectSpeechPCM } from "../../scripts/vad-test-audio.mjs";
 
 test.use({
   launchOptions: {
@@ -64,6 +65,7 @@ for (const width of [1440, 390]) {
         json: {
           projects: [candidate, { ...candidate, name: "第二个合成项目" }],
           duplicate: requests > 1,
+          warnings: ["项目 1 的验证方式缺少可靠原文定位，已留空，请核对补充。"],
         },
       });
     });
@@ -91,7 +93,8 @@ for (const width of [1440, 390]) {
       mimeType: "text/plain",
       buffer: Buffer.from(candidate.resume),
     });
-    await expect(page.getByRole("status")).toContainText("这份简历已上传过");
+    await expect(page.getByText(/这份简历已上传过/)).toBeVisible();
+    await expect(page.getByText(/验证方式缺少可靠原文定位/)).toBeVisible();
     await expect(page.locator(".resume-candidate")).toHaveCount(2);
     await page
       .locator(".resume-candidate")
@@ -121,7 +124,7 @@ for (const width of [1440, 390]) {
       ),
     ).toBeTruthy();
   });
-  test(`录音、转写、编辑加入回答且不自动提交 ${width}`, async ({
+  test(`单击麦克风、停顿后自动转写填入且不提交 ${width}`, async ({
     page,
     context,
   }) => {
@@ -142,10 +145,11 @@ for (const width of [1440, 390]) {
       });
     });
     await page.goto("/#/trainings/" + training.id);
+    await injectSpeechPCM(page);
     await page.getByLabel("你的回答", { exact: true }).fill("已有草稿");
-    await page
-      .getByRole("checkbox", { name: "同意将本段录音发送至百炼进行语音识别" })
-      .check();
+    await expect(
+      page.getByRole("checkbox", { name: /同意.*录音/ }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "开始录音", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "结束录音", exact: true }),
@@ -153,23 +157,18 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("button", { name: "提交并继续", exact: true }),
     ).toBeDisabled();
-    await page.waitForTimeout(850);
-    await page.getByRole("button", { name: "结束录音", exact: true }).click();
-    await page.getByRole("button", { name: "转为文字", exact: true }).click();
-    await expect(page.getByLabel("语音转写结果")).toHaveValue(
-      "我负责预约接口，使用数据库唯一约束。",
-    );
     await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
-      "已有草稿",
+      "已有草稿\n我负责预约接口，使用数据库唯一约束。",
+      { timeout: 20000 },
     );
+    await expect(page.getByLabel("语音转写结果")).toHaveCount(0);
     await page
-      .getByLabel("语音转写结果")
-      .fill("我负责预约接口，验证方式还待补充。");
+      .getByLabel("你的回答", { exact: true })
+      .fill("已有草稿\n我负责预约接口，验证方式还待补充。");
     await page.screenshot({
       path: `test-results/voice-input-${width}.png`,
       fullPage: true,
     });
-    await page.getByRole("button", { name: "加入回答", exact: true }).click();
     await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
       "已有草稿\n我负责预约接口，验证方式还待补充。",
     );
@@ -216,6 +215,97 @@ test("简历失败可重试、原草稿不被覆盖", async ({ page }) => {
   );
   expect(count).toBe(2);
 });
+
+test("真实VAD不会把持续噪声当说话，无语音时不上传", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["microphone"]);
+  const { training } = await seed(page);
+  let uploads = 0;
+  await page.route("**/transcribe", (route) => {
+    uploads++;
+    return route.fulfill({ json: { text: "不应出现" } });
+  });
+  await page.goto("/#/trainings/" + training.id);
+  await injectSpeechPCM(page, true);
+  await page.getByRole("button", { name: "开始录音", exact: true }).click();
+  await expect(page.getByRole("button", { name: "结束录音" })).toBeVisible();
+  await expect(page.getByRole("alert")).toContainText("未检测到语音", {
+    timeout: 15000,
+  });
+  await expect(
+    page.getByRole("button", { name: "开始录音", exact: true }),
+  ).toBeVisible();
+  expect(uploads).toBe(0);
+});
+
+test("VAD模型加载失败时可手动结束并转写", async ({ page, context }) => {
+  await context.grantPermissions(["microphone"]);
+  const { training } = await seed(page);
+  await page.route("**/vad/**/*.onnx", (route) =>
+    route.fulfill({ status: 503 }),
+  );
+  await page.route("**/transcribe", (route) =>
+    route.fulfill({ json: { text: "手动转写" } }),
+  );
+  await page.goto("/#/trainings/" + training.id);
+  await page.getByRole("button", { name: "开始录音", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("手动结束录音");
+  await page.waitForTimeout(850);
+  await page.getByRole("button", { name: "结束录音" }).click();
+  await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
+    "手动转写",
+  );
+});
+
+test("VAD加载期间离开页面不会继续录音或上传", async ({ page, context }) => {
+  await context.grantPermissions(["microphone"]);
+  const { training } = await seed(page);
+  let releaseModel: (() => void) | undefined;
+  const released = new Promise<void>((resolve) => {
+    releaseModel = resolve;
+  });
+  let entered: (() => void) | undefined;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  await page.addInitScript(() => {
+    const original = navigator.mediaDevices.getUserMedia.bind(
+      navigator.mediaDevices,
+    );
+    navigator.mediaDevices.getUserMedia = async (constraints) => {
+      const stream = await original(constraints);
+      (window as unknown as { testMicStream: MediaStream }).testMicStream =
+        stream;
+      return stream;
+    };
+  });
+  await page.route("**/vad/**/*.onnx", async (route) => {
+    entered!();
+    await released;
+    await route.continue();
+  });
+  let uploads = 0;
+  await page.route("**/transcribe", (route) => {
+    uploads++;
+    return route.fulfill({ json: { text: "不应上传" } });
+  });
+  await page.goto("/#/trainings/" + training.id);
+  await page.getByRole("button", { name: "开始录音", exact: true }).click();
+  await started;
+  await page.getByRole("link", { name: "我的项目", exact: true }).click();
+  expect(
+    await page.evaluate(() =>
+      (window as unknown as { testMicStream: MediaStream }).testMicStream
+        .getTracks()
+        .every((track) => track.readyState === "ended"),
+    ),
+  ).toBeTruthy();
+  releaseModel!();
+  await page.waitForTimeout(800);
+  expect(uploads).toBe(0);
+});
 test("录音取消不上传、转写失败保留录音可重试", async ({ page, context }) => {
   await context.grantPermissions(["microphone"]);
   const { training } = await seed(page);
@@ -227,9 +317,6 @@ test("录音取消不上传、转写失败保留录音可重试", async ({ page,
       : route.fulfill({ json: { text: "合成转写" } });
   });
   await page.goto("/#/trainings/" + training.id);
-  await page
-    .getByRole("checkbox", { name: "同意将本段录音发送至百炼进行语音识别" })
-    .check();
   await page.getByRole("button", { name: "开始录音", exact: true }).click();
   await expect(page.getByRole("button", { name: "取消录音" })).toBeVisible();
   await page.getByRole("button", { name: "取消录音" }).click();
@@ -240,10 +327,47 @@ test("录音取消不上传、转写失败保留录音可重试", async ({ page,
   ).toBeVisible();
   await page.waitForTimeout(850);
   await page.getByRole("button", { name: "结束录音", exact: true }).click();
-  await page.getByRole("button", { name: "转为文字", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("语音识别超时");
   await expect(page.locator(".recorded-audio audio")).toBeVisible();
-  await page.getByRole("button", { name: "转为文字", exact: true }).click();
-  await expect(page.getByLabel("语音转写结果")).toHaveValue("合成转写");
+  await page.getByRole("button", { name: "重试转写", exact: true }).click();
+  await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
+    "合成转写",
+  );
   expect(count).toBe(2);
+});
+
+test("自动转写使用最新草稿，超长结果保留且不截断", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["microphone"]);
+  const { training } = await seed(page);
+  let resolve: (() => void) | undefined;
+  const responseReady = new Promise<void>((done) => {
+    resolve = done;
+  });
+  await page.route("**/transcribe", async (route) => {
+    await responseReady;
+    await route.fulfill({ json: { text: "这段转写超过剩余空间" } });
+  });
+  await page.goto("/#/trainings/" + training.id);
+  await page.getByRole("button", { name: "开始录音", exact: true }).click();
+  await expect(page.getByRole("button", { name: "结束录音" })).toBeVisible();
+  await page.waitForTimeout(850);
+  await page.getByRole("button", { name: "结束录音" }).click();
+  await expect(page.getByText("正在转写", { exact: true })).toBeVisible();
+  await page.getByLabel("你的回答", { exact: true }).fill("a".repeat(5995));
+  resolve!();
+  await expect(page.getByLabel("语音转写结果")).toHaveValue(
+    "这段转写超过剩余空间",
+  );
+  await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
+    "a".repeat(5995),
+  );
+  await page.getByLabel("语音转写结果").fill("短句");
+  await page.getByRole("button", { name: "加入回答", exact: true }).click();
+  await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue(
+    "a".repeat(5995) + "\n短句",
+  );
+  await expect(page.getByRole("alert")).toHaveCount(0);
 });
