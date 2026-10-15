@@ -2,6 +2,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public requestId?: string,
   ) {
     super(message);
   }
@@ -10,10 +11,12 @@ export async function api<T>(
   path: string,
   method = "GET",
   data?: unknown,
+  signal?: AbortSignal,
 ): Promise<T> {
   const response = await fetch("/api" + path, {
     method,
     credentials: "same-origin",
+    signal,
     headers: { "Content-Type": "application/json" },
     ...(data === undefined ? {} : { body: JSON.stringify(data) }),
   });
@@ -28,6 +31,7 @@ export async function api<T>(
           429: "操作过于频繁，请稍后再试",
         }[response.status] ??
           "请求失败，请稍后重试"),
+      body.requestId || response.headers.get("X-Request-ID") || undefined,
     );
   }
   return response.status === 204 ||

@@ -27,8 +27,10 @@ export function paymentUrl(value: string, mode: string) {
 export function orderLabel(o: Order) {
   if (o.status === "EXPIRED") {
     if (o.mode === "mock") return "订单已超时取消，请创建新订单";
-    if (o.query_status === "NOT_CREATED") return "订单已超时取消，支付宝尚未创建交易";
-    if (o.query_status === "QUERY_FAILED") return "订单已过期，付款状态待确认，可重试查询";
+    if (o.query_status === "NOT_CREATED")
+      return "订单已超时取消，支付宝尚未创建交易";
+    if (o.query_status === "QUERY_FAILED")
+      return "订单已过期，付款状态待确认，可重试查询";
     return "订单已过期，付款入口已关闭，支付宝状态待确认";
   }
   if (o.status === "REFUNDING") return "退款处理中或待确认，剩余权益已暂停";
@@ -72,18 +74,34 @@ export function paymentForm(html: string, mode: string) {
   return { action, fields };
 }
 
-export function submitPaymentForm(html: string, mode: string) {
+export function openPaymentWindow() {
+  const popup = window.open(
+    "about:blank",
+    "probe-payment-" + crypto.randomUUID(),
+    "popup,width=1000,height=780",
+  );
+  if (popup) {
+    // Keep the opener relationship so the trusted cashier can be closed on confirmation.
+    popup.document.title = "支付宝收银台";
+    popup.document.body.textContent = "正在打开支付宝收银台…";
+  }
+  return popup;
+}
+
+export function submitPaymentForm(html: string, mode: string, popup?: Window) {
   const parsed = paymentForm(html, mode);
-  const form = document.createElement("form");
+  if (popup?.closed) throw new Error("收银台已关闭，请重新打开付款");
+  const target = popup?.document || document;
+  const form = target.createElement("form");
   form.method = "POST";
   form.action = parsed.action;
   for (const [name, value] of parsed.fields) {
-    const input = document.createElement("input");
+    const input = target.createElement("input");
     input.type = "hidden";
     input.name = name;
     input.value = value;
     form.appendChild(input);
   }
-  document.body.appendChild(form);
+  target.body.appendChild(form);
   HTMLFormElement.prototype.submit.call(form);
 }

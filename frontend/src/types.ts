@@ -1,3 +1,10 @@
+export type ListPage<T> = {
+  items: T[];
+  hasMore: boolean;
+  total: number;
+  offset: number;
+  limit: number;
+};
 export type Fact = {
   id: string;
   text: string;
@@ -29,7 +36,12 @@ export type Turn = {
   topic: string;
   answer: string;
   answeredAt?: number;
+  createdAt?: number;
 };
+export type ProjectSummary = Pick<
+  Project,
+  "id" | "version" | "name" | "stack" | "background" | "factsConfirmed"
+>;
 export type Finding = {
   topic: string;
   assessment: string;
@@ -46,6 +58,8 @@ export type Report = {
   mode: string;
 };
 export type Training = {
+  historyKey?: string;
+  historyRoundNumber?: number;
   id: string;
   status: string;
   kind: string;
@@ -78,6 +92,24 @@ export type Training = {
     packageId: string;
     returned?: boolean;
   };
+};
+export type TrainingSummary = Pick<
+  Training,
+  | "id"
+  | "status"
+  | "kind"
+  | "maxTurns"
+  | "createdAt"
+  | "historyKey"
+  | "historyRoundNumber"
+  | "retestEntry"
+  | "packageId"
+  | "leaseUntil"
+> & {
+  project: Pick<Project, "id" | "name">;
+  answeredCount: number;
+  turnCount: number;
+  retestTopics?: string[];
 };
 export type Order = {
   id: string;
