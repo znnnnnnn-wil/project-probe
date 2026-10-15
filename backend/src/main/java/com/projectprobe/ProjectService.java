@@ -43,13 +43,35 @@ public class ProjectService {
   }
 
   List<Map<String, Object>> all(String user) {
+    return all(user, false);
+  }
+
+  List<Map<String, Object>> all(String user, boolean summary) {
     return s.db
       .queryForList(
-        "SELECT id FROM projects WHERE user_id=? ORDER BY updated_at DESC",
+        "SELECT id,version,body FROM projects WHERE user_id=? ORDER BY updated_at DESC,id DESC",
         user
       )
       .stream()
-      .map(r -> get(user, str(r, "id")))
+      .map(r -> {
+        var body = s.decode(r.get("body"));
+        body.put("id", r.get("id"));
+        body.put("version", r.get("version"));
+        if (summary) {
+          var fields = new LinkedHashMap<String, Object>();
+          for (String key : List.of(
+            "id",
+            "name",
+            "stack",
+            "background",
+            "factsConfirmed",
+            "version"
+          ))
+            if (body.containsKey(key)) fields.put(key, body.get(key));
+          return fields;
+        }
+        return body;
+      })
       .toList();
   }
 

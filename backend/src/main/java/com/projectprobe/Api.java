@@ -53,8 +53,10 @@ public class Api {
       payments.mode,
       "paymentConfigured",
       payments.configured(),
-      "speechEnabled", inputs.speechReady(),
-      "resumeImportEnabled", model.mode.equals("live")
+      "speechEnabled",
+      inputs.speechReady(),
+      "resumeImportEnabled",
+      model.mode.equals("live")
     );
   }
 
@@ -79,8 +81,11 @@ public class Api {
   }
 
   @GetMapping("/projects")
-  Object projects(HttpServletRequest r) {
-    return projects.all(auth.user(r));
+  Object projects(
+    HttpServletRequest r,
+    @RequestParam(defaultValue = "false") boolean summary
+  ) {
+    return projects.all(auth.user(r), summary);
   }
 
   @GetMapping("/projects/{id}")
@@ -111,19 +116,32 @@ public class Api {
   }
 
   @PostMapping(value = "/resume/import", consumes = "multipart/form-data")
-  Object importResume(HttpServletRequest r, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+  Object importResume(
+    HttpServletRequest r,
+    @RequestParam("file") org.springframework.web.multipart.MultipartFile file
+  ) {
     return inputs.resume(auth.user(r), file);
   }
 
-  @PostMapping(value = "/trainings/{id}/transcribe", consumes = "multipart/form-data")
-  Object transcribe(HttpServletRequest r, @PathVariable String id,
-    @RequestParam("turnId") String turnId, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+  @PostMapping(
+    value = "/trainings/{id}/transcribe",
+    consumes = "multipart/form-data"
+  )
+  Object transcribe(
+    HttpServletRequest r,
+    @PathVariable String id,
+    @RequestParam("turnId") String turnId,
+    @RequestParam("file") org.springframework.web.multipart.MultipartFile file
+  ) {
     String user = auth.user(r);
     var training = trainings.get(user, id);
     var turns = Store.list(training, "turns");
-    if (!"ACTIVE".equals(training.get("status")) || turns.isEmpty() ||
-      !turnId.equals(turns.get(turns.size() - 1).get("id")) || !Store.str(turns.get(turns.size() - 1), "answer").isBlank())
-      throw Store.error(409, "本题已结束，请重新加载当前问题");
+    if (
+      !"ACTIVE".equals(training.get("status")) ||
+      turns.isEmpty() ||
+      !turnId.equals(turns.get(turns.size() - 1).get("id")) ||
+      !Store.str(turns.get(turns.size() - 1), "answer").isBlank()
+    ) throw Store.error(409, "本题已结束，请重新加载当前问题");
     return inputs.transcribe(user, file);
   }
 
@@ -137,13 +155,45 @@ public class Api {
   }
 
   @GetMapping("/trainings")
-  Object trainings(HttpServletRequest r) {
-    return trainings.all(auth.user(r));
+  Object trainings(
+    HttpServletRequest r,
+    @RequestParam(defaultValue = "false") boolean summary,
+    @RequestParam(defaultValue = "") String project
+  ) {
+    if (project.length() > 36) throw Store.error(400, "项目筛选参数不正确");
+    return new TrainingCatalog(s, payments).all(auth.user(r), summary, project);
   }
 
   @GetMapping("/trainings/{id}")
   Object training(HttpServletRequest r, @PathVariable String id) {
     return trainings.get(auth.user(r), id);
+  }
+
+  @GetMapping("/training-page")
+  Object trainingPage(
+    HttpServletRequest r,
+    @RequestParam(defaultValue = "0") int offset,
+    @RequestParam(defaultValue = "20") int limit,
+    @RequestParam(defaultValue = "") String key,
+    @RequestParam(defaultValue = "") String project
+  ) {
+    return new TrainingCatalog(s, payments).page(
+      auth.user(r),
+      offset,
+      limit,
+      key,
+      project
+    );
+  }
+
+  @GetMapping("/training-overview")
+  Object trainingOverview(HttpServletRequest r) {
+    return new TrainingCatalog(s, payments).overview(auth.user(r));
+  }
+
+  @GetMapping("/training-projects")
+  Object trainingProjects(HttpServletRequest r) {
+    return new TrainingCatalog(s, payments).choices(auth.user(r));
   }
 
   @PostMapping("/trainings")
@@ -185,8 +235,11 @@ public class Api {
   }
 
   @GetMapping("/shop")
-  Object shop(HttpServletRequest r) {
-    return payments.shop(auth.user(r));
+  Object shop(
+    HttpServletRequest r,
+    @RequestParam(defaultValue = "false") boolean summary
+  ) {
+    return payments.shop(auth.user(r), summary);
   }
 
   @PostMapping("/orders")
