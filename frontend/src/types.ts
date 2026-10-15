@@ -52,6 +52,10 @@ export type Finding = {
   materials: Fact[];
 };
 export type Report = {
+  comparisons?: { topic: string; status: string; assessment: string;
+    previousEvidence: { turnId: string; question: string; quote: string }[];
+    currentEvidence: { turnId: string; question: string; quote: string }[];
+  }[];
   clearParts: string[];
   findings: Finding[];
   retestTopics: string[];

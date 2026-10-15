@@ -298,6 +298,17 @@ export function ReportPage({ id, run, busy }: Actions & { id: string }) {
           {t.kind === "RETEST" && (
             <section className="panel comparison">
               <h2>前后回答对照</h2>
+              {t.report.comparisons?.map((item, i) => <article key={i}>
+                <h3>{item.topic} · {({ EXPLAINED: "本轮已补充解释", PARTIAL: "部分补充",
+                  UNRESOLVED: "仍待解释", NOT_COMPARABLE: "条件不同，不能直接比较", NEEDS_REVIEW: "待自行核对" } as Record<string, string>)[item.status]}</h3>
+                <p>{item.assessment}</p>
+                <p>仅比较回答中的解释，未执行代码或独立验证实现。</p>
+                <div className="comparison-grid">{[item.previousEvidence, item.currentEvidence].map((group, index) =>
+                  <div key={index}><h4>{index ? "本轮证据" : "上轮证据"}</h4>{group.map(e =>
+                    <blockquote key={e.turnId}><small>{e.question}</small><p>{e.quote}</p></blockquote>,
+                  )}</div>,
+                )}</div>
+              </article>)}
               <p>
                 问题场景已变化。以下保留两轮原文供你检查新增解释，不用字数或总分代替理解程度。
               </p>
