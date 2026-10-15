@@ -25,6 +25,7 @@ public class ModelService {
   final String mode, url, key, model, provider;
   @org.springframework.beans.factory.annotation.Autowired(required = false)
   UsageMetrics usage;
+  final ThreadLocal<Long> questionDeadline = ThreadLocal.withInitial(() -> Long.MAX_VALUE);
   java.util.concurrent.Semaphore modelSlots =
     new java.util.concurrent.Semaphore(4);
 
@@ -141,10 +142,12 @@ public class ModelService {
   private Map<String, Object> callOwned(String rule, Object data) {
     var body = requestBody(rule, data);
     for (int attempt = 0; attempt < 2; attempt++) try {
+      long remaining = questionDeadline.get() - now();
+      if (remaining < 1000) throw error(503, "问题生成预算已用尽，请重试");
       var request = HttpRequest.newBuilder(
         URI.create(url.replaceAll("/$", "") + "/chat/completions")
       )
-        .timeout(Duration.ofSeconds(timeoutSeconds))
+        .timeout(Duration.ofMillis(Math.min(timeoutSeconds * 1000L, remaining)))
         .header("Authorization", "Bearer " + key)
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(s.encode(body)))
@@ -318,6 +321,31 @@ public class ModelService {
 
   record GeneratedQuestion(String question, String topic) {}
 
+  GeneratedQuestion checkedQuestion(String rule, Map<String, Object> input, Map<String, Object> body, boolean retest) {
+    rule += " 使用‘请说明’等单句请求表达，以句号结束，不使用问号；只围绕一个核心点，不并列多个任务。";
+    long previous = questionDeadline.get();
+    questionDeadline.set(Math.min(previous, now() + 80000));
+    try {
+      for (int attempt = 0; attempt < 2; attempt++) {
+        var out = call(rule, input);
+        try {
+          var question = validateQuestion(out, body);
+          QuestionCoverage.validateGoal(out, body);
+          if (retest && (!question.topic().equals(str(body, "focus")) ||
+              !question.question().contains(modelText(out, "changedCondition", 300))))
+            throw error(503, "复测主题或变化条件不符合要求");
+          return question;
+        } catch (org.springframework.web.server.ResponseStatusException e) {
+          if (attempt > 0 || questionDeadline.get() - now() < 5000) throw e;
+          input = new LinkedHashMap<>(input);
+          input.put("repair", Map.of("validationError", Objects.toString(e.getReason(), "非法输出"), "invalidOutput", out));
+          rule += " 上次输出未通过服务端校验，请按repair中的错误修正，仍只询问一个主要目标；不要提供答案。如果目标已重复，请直接换一个未覆盖目标；或以‘假设’提出新条件，并额外返回changedCondition字段，其值为条件原文。复测必须紧扣focus和首题变化条件，不得转向其他薄弱点。";
+        }
+      }
+      throw error(503, "问题修复失败");
+    } finally { if (previous == Long.MAX_VALUE) questionDeadline.remove(); else questionDeadline.set(previous); }
+  }
+
   Map<String, Object> retestTarget(Map<String, Object> previous) {
     return retestTarget(previous, "");
   }
@@ -369,6 +397,8 @@ public class ModelService {
   Map<String, Object> questionInput(Map<String, Object> body) {
     var input = new LinkedHashMap<String, Object>();
     input.put("coverage", QuestionCoverage.summarize(body));
+    input.put("askedGoals", QuestionCoverage.budgets(body));
+    input.put("coveragePolicy", "askedGoals按规则汇总本轮已问目标。已有目标只能在明确改变假设条件时再问，并返回changedCondition（新条件原文，出现在问题中）；否则换一个未覆盖目标。不要反复要求同一个方法签名或事务边界。用户明确暂时不会时先记录缺口，转下个目标。规则分类不代表掌握情况。");
     input.put("difficulty", body.getOrDefault("difficulty", "IMPLEMENTATION"));
     input.put("questionPolicy", "先选coverage中未覆盖或自报待补充的具体目标；已有回答的主题须指出缺口或改变条件才追问。已有回答不等于掌握。BASIC聚焦职责与正常流程，IMPLEMENTATION聚焦实现细节，TRADEOFF聚焦故障与方案取舍。不得预设未提供的组件。每题180字以内，最多一个问号。");
     for (String field : List.of(
@@ -409,17 +439,8 @@ public class ModelService {
   GeneratedQuestion firstRetestQuestion(Map<String, Object> body) {
     String focus = str(body, "focus");
     if (mode.equals("demo")) return demoRetestQuestion(body, true);
-    var out = call(
-      "根据 retestTarget 选定的具体薄弱点、previousReport、previousTurns、previousProject 和本轮 project 修订材料生成一个复测首题。必须改变与此薄弱点相关的条件或约束，不能统一套用并发/双实例。报告中的 task 是建议，不能说成用户提出或已实现的方案；本轮材料写明计划或未验证时必须保留该边界。开放询问设计与取舍，不预设某个技术能解决问题或强制采用指定实现。只问一个问题。返回 {question:string,topic:string,changedCondition:string}，topic 必须等于 focus，changedCondition 为新条件的原文并出现在 question 中。不要重复上轮或本轮问题。",
-      questionInput(body)
-    );
-    String condition = modelText(out, "changedCondition", 300);
-    var generated = validateQuestion(out, body);
-    if (
-      !generated.topic().equals(focus) ||
-      !generated.question().contains(condition)
-    ) throw error(503, "复测主题或变化条件不符合要求，请重试");
-    return generated;
+    return checkedQuestion(
+      "根据 retestTarget 选定的具体薄弱点、previousReport、previousTurns、previousProject 和本轮 project 修订材料生成一个复测首题。必须改变与此薄弱点相关的条件或约束，不能统一套用并发/双实例。报告中的 task 是建议，不能说成用户提出或已实现的方案；本轮材料写明计划或未验证时必须保留该边界。开放询问设计与取舍，不预设某个技术能解决问题或强制采用指定实现。只问一个问题。返回 {question:string,topic:string,changedCondition:string}，topic 必须等于 focus，changedCondition 为新条件的原文并出现在 question 中。不要重复上轮或本轮问题。" , questionInput(body), body, true);
   }
 
   GeneratedQuestion firstDeepQuestion(Map<String, Object> body) {
@@ -451,13 +472,8 @@ public class ModelService {
         "变化条件与验证"
       );
     }
-    return validateQuestion(
-      call(
-        "生成本轮项目深挖首题，返回 {question:string,topic:string}。结合project及trainingHistory/historyTurns，只问一个主要目标明确的问题，控制在180字以内。第一次训练可从具体功能和个人职责切入，不要固定套用开场句；已有训练时不要再次要求泛泛介绍背景、请求链路或全部职责，也不要只更换措辞重复旧题。优先历史回答未解释的具体缺口、尚未验证的边界，或明确改变的假设条件。历史空回答表示未回答，截断回答不能视为完整回答；旧回答不是本轮已提交事实，不得编造用户实现、测试结果或补充任务已完成。缺少新材料时开放询问，不预设技术组件已经使用。",
-        questionInput(body)
-      ),
-      body
-    );
+    return checkedQuestion(
+        "生成本轮项目深挖首题，返回 {question:string,topic:string}。结合project及trainingHistory/historyTurns，只问一个主要目标明确的问题，控制在180字以内。第一次训练可从具体功能和个人职责切入，不要固定套用开场句；已有训练时不要再次要求泛泛介绍背景、请求链路或全部职责，也不要只更换措辞重复旧题。优先历史回答未解释的具体缺口、尚未验证的边界，或明确改变的假设条件。历史空回答表示未回答，截断回答不能视为完整回答；旧回答不是本轮已提交事实，不得编造用户实现、测试结果或补充任务已完成。缺少新材料时开放询问，不预设技术组件已经使用。" , questionInput(body), body, false);
   }
 
   GeneratedQuestion question(Map<String, Object> body) {
@@ -495,14 +511,9 @@ public class ModelService {
         topics[index]
       );
     }
-    return validateQuestion(
-      call(
+    return checkedQuestion(
         "先核对历史已回答的问题：换措辞、替换标点不构成新的追问；只有回答中的具体缺口或明确变化条件才继续追问。问题控制在 180 字以内、最多一个问号，避免同时要求列步骤、比较方案和设计测试。" +
-          "根据当前项目和最后一个回答，只问一个主要目标明确的具体追问，最多附带一个紧密相关的说明要求，不并列抛出多个独立问题。trainingHistory/historyTurns是其他轮次，仅供避免重复和寻找缺口，不是本轮已提交事实；不要把旧回答或截断片段当作当前回答。不要重复本轮或历次历史问题；优先用户已明确未说明的职责、验证缺口或风险，再追问相关实现。使用‘你提到’时只能转述真实回答，不把上一题的假设或推测转成用户事实。复测围绕 focus/previousReport 的选定薄弱点和首题变化条件继续；回答偏题时明确指出尚未解释的点，再针对它追问，不因新术语转到无关知识点。返回 {question:string,topic:string}，topic 为这个问题的具体主题，不能按轮次套标签。",
-        questionInput(body)
-      ),
-      body
-    );
+          "根据当前项目和最后一个回答，只问一个主要目标明确的具体追问，最多附带一个紧密相关的说明要求，不并列抛出多个独立问题。trainingHistory/historyTurns是其他轮次，仅供避免重复和寻找缺口，不是本轮已提交事实；不要把旧回答或截断片段当作当前回答。不要重复本轮或历次历史问题；优先用户已明确未说明的职责、验证缺口或风险，再追问相关实现。使用‘你提到’时只能转述真实回答，不把上一题的假设或推测转成用户事实。复测围绕 focus/previousReport 的选定薄弱点和首题变化条件继续；回答偏题时明确指出尚未解释的点，再针对它追问，不因新术语转到无关知识点。返回 {question:string,topic:string}，topic 为这个问题的具体主题，不能按轮次套标签。" , questionInput(body), body, false);
   }
 
   GeneratedQuestion reviseQuestion(Map<String, Object> body) {

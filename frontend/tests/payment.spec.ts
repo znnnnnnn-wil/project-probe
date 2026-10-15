@@ -68,6 +68,7 @@ async function fixture(
       }
       json = order;
     } else if (path === "/api/orders/" + id) json = order;
+    else if (/^\/api\/projects\/[^/]+\/practice$/.test(path)) json = { status: "AVAILABLE" };
     else throw new Error("支付测试出现未预期接口：" + path);
     await route.fulfill({ json });
   });

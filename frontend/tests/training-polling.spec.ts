@@ -70,7 +70,8 @@ async function fixture(page: Page) {
         ],
       };
       json = state;
-    } else if (path === "/api/projects" || path === "/api/trainings") json = [];
+    } else if (path === "/api/trainings/" + id + "/draft") json = { turnId: "turn-2", answer: "", version: 0 };
+    else if (path === "/api/projects" || path === "/api/trainings") json = [];
     else if (path === "/api/training-overview")
       json = { items: [], activeCount: 0, completedCount: 0 };
     else if (path === "/api/shop")

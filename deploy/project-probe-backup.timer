@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Project Probe backup at 03:20 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 19:20:00 UTC
+Persistent=true
+Unit=project-probe-backup.service
+
+[Install]
+WantedBy=timers.target

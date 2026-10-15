@@ -6,6 +6,7 @@ if (!origin || !/^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
 }
 export default defineConfig({
   ...base,
+  outputDir: "../.runtime/deployment-browser-results",
   webServer: undefined,
   use: { ...base.use, baseURL: origin },
 });

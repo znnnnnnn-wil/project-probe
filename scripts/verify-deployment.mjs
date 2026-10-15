@@ -166,6 +166,8 @@ async function api(route, method = "GET", body) {
 }
 const syntheticEnv = {
   ...process.env,
+  SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: "3",
+  SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: "0",
   TRUSTED_PROXY_ADDRESSES: "",
   MODEL_MODE: "demo",
   MODEL_API_KEY: "",
@@ -232,12 +234,13 @@ try {
   );
   const summaries = [
     ...backendOutput.matchAll(
-      /Tests run: (\d+), Failures: 0, Errors: 0, Skipped: 0/g,
+      /Tests run: (\d+), Failures: 0, Errors: 0, Skipped: (\d+)/g,
     ),
   ];
   const totalTests = Number(summaries.at(-1)?.[1]);
   assert(totalTests >= 99 && backendOutput.includes("BUILD SUCCESS"));
-  pass(totalTests + " 项后端测试在独立 PostgreSQL regression 库运行");
+  const skippedTests = Number(summaries.at(-1)?.[2] || 0);
+  pass(`${totalTests - skippedTests} 项后端测试通过、${skippedTests} 项跳过，独立 PostgreSQL regression 库`);
   const browserOutput = await run(
     process.platform === "win32" ? "cmd.exe" : "npm",
     process.platform === "win32"
@@ -314,6 +317,18 @@ try {
   pass(
     "8 次并发模拟支付只发一包；后端和 PostgreSQL 重启后会话、回答、权益、报告恢复",
   );
+  // 将专用验收库备份还原到新库，绝不覆盖运行库。
+  const sql = (database, query) => compose(["exec", "-T", "db", "psql", "-U", "projectprobe", "-d", database, "-At", "-v", "ON_ERROR_STOP=1", "-c", query]);
+  const tables = ["app_users", "projects", "project_revisions", "purchase_orders", "training_packages", "trainings", "entitlement_events", "answer_drafts", "account_recovery", "project_trials", "model_usage", "report_views", "user_feedback"];
+  const beforeRestore = {};
+  for (const table of tables) beforeRestore[table] = (await sql("projectprobe", `SELECT COUNT(*) FROM ${table}`)).trim();
+  await compose(["exec", "-T", "db", "pg_dump", "-U", "projectprobe", "-Fc", "-f", "/tmp/probe-acceptance.dump", "projectprobe"], { logName: "backup.log" });
+  await sql("projectprobe", "CREATE DATABASE restore_check");
+  await compose(["exec", "-T", "db", "pg_restore", "-U", "projectprobe", "-d", "restore_check", "--exit-on-error", "/tmp/probe-acceptance.dump"], { logName: "restore.log" });
+  for (const table of tables) assert.equal((await sql("restore_check", `SELECT COUNT(*) FROM ${table}`)).trim(), beforeRestore[table], table + "还原数量不一致");
+  const evidenceSql = "SELECT md5(body) FROM trainings ORDER BY id";
+  assert.equal(await sql("restore_check", evidenceSql), await sql("projectprobe", evidenceSql), "训练与报告原文还原不一致");
+  pass("独立数据库备份还原至restore_check：13张业务表数量和训练报告原文摘要一致，未覆盖运行库");
   // 两个 Docker 网络客户端保有不同 TCP 来源；不以伪造转发头模拟两个访客。
   const python = `import urllib.request, urllib.error, json, os
 def request(target, path='/api/auth/login', spoof=''):

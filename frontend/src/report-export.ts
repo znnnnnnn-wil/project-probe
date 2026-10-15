@@ -33,6 +33,13 @@ export function reportMarkdown(training: Training) {
       lines.push("", "材料依据：" + fact.text),
     );
   });
+  for (const item of report.comparisons || []) {
+    lines.push("", "## 复测前后对照 · " + item.topic, "", item.assessment,
+      "仅比较已表达内容，未独立验证代码实现。", "", "上轮原回答：");
+    item.previousEvidence.forEach(e => lines.push(e.question, e.quote));
+    lines.push("", "本轮原回答：");
+    item.currentEvidence.forEach(e => lines.push(e.question, e.quote));
+  }
   lines.push("", "## 问答记录");
   training.turns
     .filter((turn) => turn.answer)

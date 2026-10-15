@@ -85,7 +85,7 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     const post = async (path: string, data: unknown = {}) => {
       const response = await page.request.post("/api" + path, {
-        headers: { Origin: "http://localhost:5174" },
+        headers: { Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174").origin },
         data,
       });
       expect(response.ok()).toBeTruthy();
