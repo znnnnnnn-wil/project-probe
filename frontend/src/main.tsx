@@ -1,103 +1,50 @@
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
-import { createRoot } from "react-dom/client";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  lazy,
+  Suspense,
+} from "react";
 import {
   ArrowUpRight,
-  ArrowRight,
-  Plus,
-  FolderOpen,
   MessageSquare,
-  FileText,
-  RefreshCw,
-  Check,
-  ChevronRight,
-  ShieldCheck,
   LogOut,
   Menu,
   X,
-  Clock,
-  Layers,
   LoaderCircle,
-  Sparkles,
-  Target,
-  CreditCard,
-  Download,
-  Printer,
-  ChevronDown,
 } from "lucide-react";
-import { api, ApiError, go, emptyProject, demoProject } from "./api";
-import type { Project, Training, Shop, Fact, Report, Order } from "./types";
-import { paymentLabel, submitPaymentForm, orderLabel } from "./payment";
-import "./style.css";
-import { Workspace, purchaseFrom, purchaseProject } from "./workspace";
-import { downloadReport } from "./report-export";
-import { trainingQuota } from "./quota";
-import { ResumeImport } from "./resume-import";
-import { VoiceInput } from "./voice-input";
+import { api, ApiError, go } from "./api";
+import { Workspace } from "./workspace";
+import { Loading, Empty, PageBoundary } from "./ui";
 
-import { Loading as SharedLoading, Empty as SharedEmpty, PageBoundary as SharedPageBoundary } from "./ui";
-const NewHome = lazy(() =>
+import { createRoot } from "react-dom/client";
+import "./style.css";
+const Home = lazy(() =>
   import("./home").then((module) => ({ default: module.Home })),
 );
-const NewLogin = lazy(() =>
+const Login = lazy(() =>
   import("./home").then((module) => ({ default: module.Login })),
 );
-const NewEditor = lazy(() =>
+const Editor = lazy(() =>
   import("./editor").then((module) => ({ default: module.Editor })),
 );
-const NewHistory = lazy(() =>
+const History = lazy(() =>
   import("./history").then((module) => ({ default: module.History })),
 );
-const NewInterview = lazy(() =>
+const Interview = lazy(() =>
   import("./interview").then((module) => ({ default: module.Interview })),
 );
-const NewReportPage = lazy(() =>
+const ReportPage = lazy(() =>
   import("./report").then((module) => ({ default: module.ReportPage })),
 );
-const NewShopPage = lazy(() =>
+const ShopPage = lazy(() =>
   import("./shop").then((module) => ({ default: module.ShopPage })),
 );
-const NewPaymentReturn = lazy(() =>
+const PaymentReturn = lazy(() =>
   import("./shop").then((module) => ({ default: module.PaymentReturn })),
 );
 
-const sourceLabel: Record<string, string> = {
-  USER_PROVIDED: "材料提供",
-  INTERVIEW_SUPPLEMENT: "面试补充",
-  AI_INFERENCE: "AI 推断",
-  NEEDS_CONFIRMATION: "待确认",
-};
-const statusLabel: Record<string, string> = {
-  ACTIVE: "进行中",
-  PENDING: "待生成",
-  GENERATING: "生成中",
-  FAILED: "可重试",
-  COMPLETED: "已完成",
-  REFUNDED: "已返还",
-};
-function Button({
-  children,
-  onClick,
-  secondary = false,
-  disabled = false,
-  type = "button",
-}: {
-  children: React.ReactNode;
-  onClick?: () => void;
-  secondary?: boolean;
-  disabled?: boolean;
-  type?: "button" | "submit";
-}) {
-  return (
-    <button
-      type={type}
-      className={"button " + (secondary ? "secondary" : "")}
-      disabled={disabled}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
 function App() {
   const [path, setPath] = useState(
     location.hash.slice(1) ||
@@ -255,19 +202,19 @@ function App() {
         </div>
       )}
       <main>
-        <SharedPageBoundary key={path}>
-          <Suspense fallback={<SharedLoading />}>
+        <PageBoundary key={path}>
+          <Suspense fallback={<Loading />}>
             {!ready ? (
-              <SharedLoading />
+              <Loading />
             ) : path === "/" && !user ? (
-              <NewHome
+              <Home
                 onStart={() => {
                   sessionStorage.setItem("auth:return", "/projects/new");
                   go("/login");
                 }}
               />
             ) : !user || path === "/login" ? (
-              <NewLogin
+              <Login
                 {...props}
                 onLogin={(u) => {
                   setUser(u);
@@ -289,31 +236,31 @@ function App() {
               path === "/" || path === "/projects" ? (
                 <Workspace {...props} />
               ) : (
-                <NewEditor key={path} id={path.split("/")[2]} {...props} />
+                <Editor key={path} id={path.split("/")[2]} {...props} />
               )
             ) : nav === "trainings" ? (
-              <NewInterview key={path} id={path.split("/")[2]} {...props} />
+              <Interview key={path} id={path.split("/")[2]} {...props} />
             ) : nav === "report" ? (
-              <NewReportPage key={path} id={path.split("/")[2]} {...props} />
+              <ReportPage key={path} id={path.split("/")[2]} {...props} />
             ) : nav === "shop" ? (
-              <NewShopPage {...props} />
+              <ShopPage {...props} />
             ) : nav === "payment-return" ? (
-              <NewPaymentReturn
+              <PaymentReturn
                 {...props}
                 configured={config?.paymentConfigured || false}
                 mode={config?.paymentMode || ""}
               />
             ) : nav === "history" ? (
-              <NewHistory {...props} />
+              <History {...props} />
             ) : (
-              <SharedEmpty
+              <Empty
                 title="页面不存在"
                 text="返回项目列表继续练习。"
                 action={() => go("/projects")}
               />
             )}
           </Suspense>
-        </SharedPageBoundary>
+        </PageBoundary>
       </main>
       <footer>
         <span>项目追问官</span>
@@ -323,95 +270,4 @@ function App() {
     </>
   );
 }
-type Actions = {
-  run: (fn: () => Promise<void>) => Promise<void>;
-  busy: boolean;
-};
-function Loading() {
-  return (
-    <div className="empty">
-      <LoaderCircle className="spin" />
-      <p>正在读取记录…</p>
-    </div>
-  );
-}
-function Empty({
-  title,
-  text,
-  action,
-}: {
-  title: string;
-  text: string;
-  action?: () => void;
-}) {
-  return (
-    <div className="empty">
-      <FolderOpen size={32} />
-      <h2>{title}</h2>
-      <p>{text}</p>
-      {action && (
-        <Button onClick={action}>
-          开始准备 <ArrowRight size={16} />
-        </Button>
-      )}
-    </div>
-  );
-}
-
-
-function PageHead({
-  eyebrow,
-  title,
-  text,
-  action,
-}: {
-  eyebrow: string;
-  title: string;
-  text: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="page-head">
-      <div>
-        <div className="section-kicker">{eyebrow}</div>
-        <h1>{title}</h1>
-        <p>{text}</p>
-      </div>
-      {action}
-    </div>
-  );
-}
-const fields: [keyof Project, string, string][] = [
-  ["name", "项目名称", "例如：校园自习室预约系统"],
-  ["targetRole", "目标岗位", "Java 后端实习"],
-  ["stack", "技术栈", "例如：Spring Boot / PostgreSQL"],
-  ["background", "项目背景与目标", "为谁解决什么问题？"],
-  ["resume", "简历中的项目经历", "粘贴原文，不需要刻意润色"],
-  [
-    "responsibility",
-    "个人职责（必填）",
-    "明确你亲自完成、参与协作及不熟悉的部分",
-  ],
-  ["architecture", "架构说明", "请求经过哪些组件？数据如何流转？"],
-  ["implementation", "关键实现", "选一个功能说明接口、表结构与处理步骤"],
-  ["problems", "遇到的问题与方案", "当时的现象、原因、选择与取舍"],
-  [
-    "verification",
-    "验证方式",
-    "测试输入、预期结果、实际证据；未验证请直接说明",
-  ],
-  [
-    "materials",
-    "README / 脱敏代码片段（可选）",
-    "仅粘贴相关文本，请删除密码、密钥和个人信息",
-  ],
-];
-
-
-
-
-
-
-
-
 createRoot(document.getElementById("root")!).render(<App />);
