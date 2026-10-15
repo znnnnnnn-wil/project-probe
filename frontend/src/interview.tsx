@@ -15,11 +15,11 @@ import { VoiceInput } from "./voice-input";
 import { Button, Loading, PageHead, sourceLabel, statusLabel } from "./ui";
 import type { Actions } from "./ui";
 import { TrainingHelp } from "./training-help";
+import { useAnswerDraft } from "./use-answer-draft";
 
 export function Interview({ id, run, busy }: Actions & { id: string }) {
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [t, setT] = useState<Training | null>(null);
-  const [answer, setAnswer] = useState("");
   const mounted = useRef(true);
   const reading = useRef<AbortController | null>(null);
   const readVersion = useRef(0);
@@ -61,13 +61,7 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
     };
   }, [load, run]);
   const turn = t?.turns[t.turns.length - 1];
-  useEffect(() => {
-    setAnswer(
-      turn?.answer ||
-        sessionStorage.getItem("draft:" + id + ":" + turn?.id) ||
-        "",
-    );
-  }, [id, turn?.id, turn?.answer]);
+  const { answer, edit: setAnswer, notice: draftNotice, localCopy, restoreLocal } = useAnswerDraft(id, turn?.id, t?.status === "ACTIVE");
   useEffect(() => {
     if (t && ["GENERATING", "PENDING"].includes(t.status)) {
       let cancelled = false;
@@ -151,7 +145,7 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
           ))}
           <div className="aside-note">
             <ShieldCheck size={17} />
-            <p>已提交内容保存在服务端；未提交草稿仅保留在当前浏览器标签页。</p>
+            <p>已提交内容保存在服务端；回答草稿自动同步，保留30天，不参与模型评估。</p>
           </div>
           <a href="#/history">离开并稍后继续</a>
           <details className="interview-materials">
@@ -239,6 +233,9 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
                 }}
               />
               <div className="answer-bottom">
+                <small role="status">{draftNotice}</small>
+                {localCopy && <details><summary>此标签页还有不同的旧草稿</summary><p>{localCopy}</p>
+                  <Button secondary onClick={restoreLocal}>使用这份本地草稿</Button></details>}
                 <span>{answer.length} / 6000</span>
                 <Button
                   type="submit"

@@ -403,6 +403,7 @@ public class TrainingService {
         !"ACTIVE".equals(r.get("status")) || t != turns.get(turns.size() - 1)
       ) throw error(409, "训练当前不能提交回答");
       t.put("answer", answer);
+      s.db.update("DELETE FROM answer_drafts WHERE training_id=?", id);
       t.put("answeredAt", now());
       list(b, "interviewFacts").add(
         Map.of(
