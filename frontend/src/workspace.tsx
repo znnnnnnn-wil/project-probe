@@ -10,7 +10,7 @@ import {
   CreditCard,
 } from "lucide-react";
 import { api, go } from "./api";
-import type { Project, Training, Shop } from "./types";
+import type { ProjectSummary, TrainingSummary, Shop } from "./types";
 import { trainingQuota } from "./quota";
 
 export function purchaseFrom(projectId?: string) {
@@ -35,28 +35,46 @@ export function Workspace({
   busy: boolean;
 }) {
   const [data, setData] = useState<{
-    projects: Project[];
-    trainings: Training[];
+    projects: ProjectSummary[];
+    trainings: TrainingSummary[];
     shop: Shop;
+    activeCount: number;
+    completedCount: number;
   } | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("全部");
   useEffect(() => {
+    const controller = new AbortController();
     run(async () => {
-      const [projects, trainings, shop] = await Promise.all([
-        api<Project[]>("/projects"),
-        api<Training[]>("/trainings"),
-        api<Shop>("/shop"),
+      const [projects, overview, shop] = await Promise.all([
+        api<ProjectSummary[]>(
+          "/projects?summary=true",
+          "GET",
+          undefined,
+          controller.signal,
+        ),
+        api<{
+          items: TrainingSummary[];
+          activeCount: number;
+          completedCount: number;
+        }>("/training-overview", "GET", undefined, controller.signal),
+        api<Shop>("/shop?summary=true", "GET", undefined, controller.signal),
       ]);
-      setData({ projects, trainings, shop });
+      if (!controller.signal.aborted)
+        setData({
+          projects,
+          trainings: overview.items,
+          shop,
+          activeCount: overview.activeCount,
+          completedCount: overview.completedCount,
+        });
     });
+    return () => controller.abort();
   }, [run]);
   const active =
     data?.trainings.filter(
       (t) => !["COMPLETED", "REFUNDED"].includes(t.status),
     ) || [];
-  const completed =
-    data?.trainings.filter((t) => t.status === "COMPLETED") || [];
   const balance = trainingQuota(data?.shop);
   const quota = balance.unlimited ? "不限次数" : balance.deepAvailable;
   const projects =
@@ -82,8 +100,8 @@ export function Workspace({
       <div className="workspace-stats" aria-label="练习概览">
         {[
           ["项目档案", data?.projects.length],
-          ["待继续训练", active.length],
-          ["已完成报告", completed.length],
+          ["待继续训练", data?.activeCount],
+          ["已完成报告", data?.completedCount],
           ["可用深挖", quota],
         ].map(([name, value]) => (
           <div key={name}>
@@ -121,8 +139,7 @@ export function Workspace({
                     <strong>{t.project.name}</strong>
                     <small>
                       {t.kind === "RETEST" ? "专项复测" : "项目深挖"} · 已保存{" "}
-                      {t.turns.filter((v) => v.answer).length}/{t.maxTurns}{" "}
-                      个回答
+                      {t.answeredCount}/{t.maxTurns} 个回答
                     </small>
                   </div>
                   <span className="badge">
