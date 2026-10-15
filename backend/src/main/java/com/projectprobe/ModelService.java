@@ -23,6 +23,11 @@ public class ModelService {
 
   final Store s;
   final String mode, url, key, model, provider;
+  java.util.concurrent.Semaphore modelSlots =
+    new java.util.concurrent.Semaphore(4);
+
+  @Value("${app.model-concurrency:4}")
+  int concurrency = 4;
 
   @Value("${app.model-timeout-seconds:30}")
   int timeoutSeconds = 30;
@@ -35,6 +40,10 @@ public class ModelService {
 
   @PostConstruct
   void validateTimeout() {
+    if (concurrency < 1 || concurrency > 32) throw new IllegalArgumentException(
+      "模型并发上限须为1–32"
+    );
+    modelSlots = new java.util.concurrent.Semaphore(concurrency);
     if (
       timeoutSeconds < 5 || timeoutSeconds > 40
     ) throw new IllegalArgumentException(
@@ -119,6 +128,15 @@ public class ModelService {
   }
 
   Map<String, Object> call(String rule, Object data) {
+    if (!modelSlots.tryAcquire()) throw error(429, "模型服务忙，请稍后重试");
+    try {
+      return callOwned(rule, data);
+    } finally {
+      modelSlots.release();
+    }
+  }
+
+  private Map<String, Object> callOwned(String rule, Object data) {
     var body = requestBody(rule, data);
     for (int attempt = 0; attempt < 2; attempt++) try {
       var request = HttpRequest.newBuilder(
@@ -130,7 +148,7 @@ public class ModelService {
         .POST(HttpRequest.BodyPublishers.ofString(s.encode(body)))
         .build();
       long started = now();
-      var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+      var response = client.send(request, BoundedBody.handler(800000));
       if (response.statusCode() == 429 || response.statusCode() >= 500) {
         if (attempt == 0) continue;
         throw error(503, "模型繁忙，请稍后重试");
@@ -168,6 +186,9 @@ public class ModelService {
         e.getReason()
       );
       throw e;
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw error(503, "模型请求已中断，可稍后恢复");
     } catch (Exception e) {
       log.warn(
         "model_call_failed provider={} model={} exceptionType={} attempt={}",
@@ -336,12 +357,49 @@ public class ModelService {
     );
   }
 
+  Map<String, Object> questionInput(Map<String, Object> body) {
+    var input = new LinkedHashMap<String, Object>();
+    for (String field : List.of(
+      "project",
+      "kind",
+      "focus",
+      "turns",
+      "historyTurns",
+      "historyRoundNumber",
+      "previousReport",
+      "previousTurns",
+      "previousProject",
+      "retestTarget"
+    ))
+      if (body.containsKey(field)) input.put(field, body.get(field));
+    // 兼容旧训练的双份历史快照，问答只由 historyTurns 提供。
+    var rounds = new ArrayList<Map<String, Object>>();
+    for (var round : list(new LinkedHashMap<>(body), "trainingHistory")) {
+      var metadata = new LinkedHashMap<>(round);
+      metadata.remove("turns");
+      rounds.add(metadata);
+    }
+    input.put("trainingHistory", rounds);
+    var seen = new HashSet<String>();
+    for (String field : List.of("turns", "previousTurns"))
+      for (var turn : list(new LinkedHashMap<>(body), field))
+        if (!str(turn, "id").isBlank()) seen.add(str(turn, "id"));
+    if (body.containsKey("historyTurns")) input.put(
+      "historyTurns",
+      list(body, "historyTurns")
+        .stream()
+        .filter(turn -> str(turn, "id").isBlank() || seen.add(str(turn, "id")))
+        .toList()
+    );
+    return input;
+  }
+
   GeneratedQuestion firstRetestQuestion(Map<String, Object> body) {
     String focus = str(body, "focus");
     if (mode.equals("demo")) return demoRetestQuestion(body, true);
     var out = call(
       "根据 retestTarget 选定的具体薄弱点、previousReport、previousTurns、previousProject 和本轮 project 修订材料生成一个复测首题。必须改变与此薄弱点相关的条件或约束，不能统一套用并发/双实例。报告中的 task 是建议，不能说成用户提出或已实现的方案；本轮材料写明计划或未验证时必须保留该边界。开放询问设计与取舍，不预设某个技术能解决问题或强制采用指定实现。只问一个问题。返回 {question:string,topic:string,changedCondition:string}，topic 必须等于 focus，changedCondition 为新条件的原文并出现在 question 中。不要重复上轮或本轮问题。",
-      body
+      questionInput(body)
     );
     String condition = modelText(out, "changedCondition", 300);
     var generated = validateQuestion(out, body);
@@ -350,6 +408,44 @@ public class ModelService {
       !generated.question().contains(condition)
     ) throw error(503, "复测主题或变化条件不符合要求，请重试");
     return generated;
+  }
+
+  GeneratedQuestion firstDeepQuestion(Map<String, Object> body) {
+    if (mode.equals("demo")) {
+      String name = str((Map<String, Object>) body.get("project"), "name");
+      int round = (
+        (Number) body.getOrDefault("historyRoundNumber", 1)
+      ).intValue();
+      if (round == 1) return new GeneratedQuestion(
+        "请介绍“" + name + "”的背景、请求链路，以及你亲自完成的部分。",
+        "项目介绍与职责"
+      );
+      String[] prompts = {
+        "请从一个你亲自处理过的异常说明恢复步骤，尚未验证的部分请直接指出。",
+        "请选择一个你实际做过的验证，说明输入和可观察结果；没有实际结果时请说明准备如何验证。",
+        "请选择项目中的一个实际技术取舍，说明当时的约束与选择依据。",
+        "请选择你实际实现过的一个状态变化，说明写入失败时能够观察到什么。",
+      };
+      if (round <= 5) return new GeneratedQuestion(
+        "针对“" + name + "”，" + prompts[round - 2],
+        List.of("异常与恢复", "验证方法", "方案取舍", "实现边界").get(round - 2)
+      );
+      return new GeneratedQuestion(
+        "假设“" +
+          name +
+          "”的同一操作连续提交" +
+          round +
+          "次，你会如何验证重复执行的结果？",
+        "变化条件与验证"
+      );
+    }
+    return validateQuestion(
+      call(
+        "生成本轮项目深挖首题，返回 {question:string,topic:string}。结合project及trainingHistory/historyTurns，只问一个主要目标明确的问题，控制在180字以内。第一次训练可从具体功能和个人职责切入，不要固定套用开场句；已有训练时不要再次要求泛泛介绍背景、请求链路或全部职责，也不要只更换措辞重复旧题。优先历史回答未解释的具体缺口、尚未验证的边界，或明确改变的假设条件。历史空回答表示未回答，截断回答不能视为完整回答；旧回答不是本轮已提交事实，不得编造用户实现、测试结果或补充任务已完成。缺少新材料时开放询问，不预设技术组件已经使用。",
+        questionInput(body)
+      ),
+      body
+    );
   }
 
   GeneratedQuestion question(Map<String, Object> body) {
@@ -377,15 +473,21 @@ public class ModelService {
       };
       int index = Math.min(turns.size() - 1, probes.length - 1);
       return new GeneratedQuestion(
-        "你提到“" + quote + "”。" + probes[index],
+        "你提到“" +
+          quote +
+          "”。" +
+          (((Number) body.getOrDefault("historyRoundNumber", 1)).intValue() > 1
+            ? "假设同一输入连续提交" + body.get("historyRoundNumber") + "次，"
+            : "") +
+          probes[index],
         topics[index]
       );
     }
     return validateQuestion(
       call(
         "先核对历史已回答的问题：换措辞、替换标点不构成新的追问；只有回答中的具体缺口或明确变化条件才继续追问。问题控制在 180 字以内、最多一个问号，避免同时要求列步骤、比较方案和设计测试。" +
-          "根据当前项目和最后一个回答，只问一个主要目标明确的具体追问，最多附带一个紧密相关的说明要求，不并列抛出多个独立问题。不要重复历史问题；优先用户已明确未说明的职责、验证缺口或风险，再追问相关实现。使用‘你提到’时只能转述真实回答，不把上一题的假设或推测转成用户事实。复测围绕 focus/previousReport 的选定薄弱点和首题变化条件继续；回答偏题时明确指出尚未解释的点，再针对它追问，不因新术语转到无关知识点。返回 {question:string,topic:string}，topic 为这个问题的具体主题，不能按轮次套标签。",
-        body
+          "根据当前项目和最后一个回答，只问一个主要目标明确的具体追问，最多附带一个紧密相关的说明要求，不并列抛出多个独立问题。trainingHistory/historyTurns是其他轮次，仅供避免重复和寻找缺口，不是本轮已提交事实；不要把旧回答或截断片段当作当前回答。不要重复本轮或历次历史问题；优先用户已明确未说明的职责、验证缺口或风险，再追问相关实现。使用‘你提到’时只能转述真实回答，不把上一题的假设或推测转成用户事实。复测围绕 focus/previousReport 的选定薄弱点和首题变化条件继续；回答偏题时明确指出尚未解释的点，再针对它追问，不因新术语转到无关知识点。返回 {question:string,topic:string}，topic 为这个问题的具体主题，不能按轮次套标签。",
+        questionInput(body)
       ),
       body
     );
@@ -447,6 +549,10 @@ public class ModelService {
         question;
       if (turns.size() >= 2) question = "结合上一题的新条件，" + question;
     }
+    int round = (
+      (Number) body.getOrDefault("historyRoundNumber", 1)
+    ).intValue();
+    if (round > 2) question = "假设验证只能执行" + round + "次，" + question;
     return new GeneratedQuestion(question, focus);
   }
 
@@ -458,6 +564,7 @@ public class ModelService {
       topic = modelText(out, "topic", 200);
     var previous = new ArrayList<>(list(body, "turns"));
     previous.addAll(list(body, "previousTurns"));
+    previous.addAll(list(body, "historyTurns"));
     String normalized = normalizeQuestion(question);
     if (
       previous
