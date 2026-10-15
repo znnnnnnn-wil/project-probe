@@ -38,9 +38,12 @@ class RetestSelectionTest {
     trainings.update(parent, "COMPLETED", body);
     String key = id();
     var input = new LinkedHashMap<String, Object>(Map.of("requestKey", key, "projectId", projectId,
-      "parentId", parent, "focus", "测试证据", "newRound", true));
+      "parentId", parent, "focus", "测试证据", "newRound", true,
+      "exerciseMode", "QUICK", "difficulty", "BASIC"));
     var first = trainings.start(user, input);
     assertEquals("测试证据", first.get("focus"));
+    assertEquals(2, first.get("maxTurns"));
+    assertEquals("BASIC", first.get("difficulty"));
     assertEquals(first.get("id"), trainings.start(user, input).get("id"));
     input.put("requestKey", id());
     assertEquals(first.get("id"), trainings.start(user, input).get("id"));

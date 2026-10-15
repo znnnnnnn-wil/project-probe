@@ -364,6 +364,9 @@ public class ModelService {
 
   Map<String, Object> questionInput(Map<String, Object> body) {
     var input = new LinkedHashMap<String, Object>();
+    input.put("coverage", QuestionCoverage.summarize(body));
+    input.put("difficulty", body.getOrDefault("difficulty", "IMPLEMENTATION"));
+    input.put("questionPolicy", "先选coverage中未覆盖或自报待补充的具体目标；已有回答的主题须指出缺口或改变条件才追问。已有回答不等于掌握。BASIC聚焦职责与正常流程，IMPLEMENTATION聚焦实现细节，TRADEOFF聚焦故障与方案取舍。不得预设未提供的组件。每题180字以内，最多一个问号。");
     for (String field : List.of(
       "project",
       "kind",
@@ -565,16 +568,17 @@ public class ModelService {
     Map<String, Object> out,
     Map<String, Object> body
   ) {
-    String question = modelText(out, "question", 1200),
+    String question = modelText(out, "question", 180),
       topic = modelText(out, "topic", 200);
+    if (question.chars().filter(c -> c == '?' || c == '？').count() > 1)
+      throw error(503, "单题包含多个问号，请重试");
     var previous = new ArrayList<>(list(body, "turns"));
     previous.addAll(list(body, "previousTurns"));
     previous.addAll(list(body, "historyTurns"));
-    String normalized = normalizeQuestion(question);
     if (
       previous
         .stream()
-        .anyMatch(t -> normalized.equals(normalizeQuestion(str(t, "question"))))
+        .anyMatch(t -> QuestionCoverage.nearDuplicate(question, str(t, "question")))
     ) throw error(503, "模型重复问题，请重试");
     return new GeneratedQuestion(question, topic);
   }

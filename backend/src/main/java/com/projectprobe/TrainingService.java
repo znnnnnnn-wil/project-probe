@@ -275,13 +275,21 @@ public class TrainingService {
       String id = id(),
         packageId = str(pack, "id");
       var body = new LinkedHashMap<String, Object>();
+      String exercise = str(input, "exerciseMode"), difficulty = str(input, "difficulty");
+      if (exercise.isBlank()) exercise = "STANDARD";
+      if (difficulty.isBlank()) difficulty = "IMPLEMENTATION";
+      if (!Set.of("QUICK", "STANDARD").contains(exercise) ||
+          !Set.of("BASIC", "IMPLEMENTATION", "TRADEOFF").contains(difficulty))
+        throw error(400, "训练模式或难度不正确");
+      body.put("exerciseMode", exercise);
+      body.put("difficulty", difficulty);
       body.put("project", project);
       body.put("historyKey", historyKey);
       body.putAll(history.context(user, projectId, historyKey, ""));
       body.put("kind", kind);
       body.put("parentId", parent);
       body.put("modelMode", model.mode);
-      body.put("maxTurns", kind.equals("DEEP") ? 5 : 3);
+      body.put("maxTurns", "QUICK".equals(exercise) ? 2 : kind.equals("DEEP") ? 5 : 3);
       String focus = "项目实现与验证";
       if (parentBody != null) {
         body.put("previousReport", parentBody.get("report"));
