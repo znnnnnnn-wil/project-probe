@@ -401,4 +401,166 @@ class TrainingHistoryRegressionTest {
     assertTrue(list(second, "interviewFacts").isEmpty());
   }
 
+  @Test
+  void liveFirstQuestionUsesModelAndOwnHistoricalContext() {
+    String user = user();
+    var p = project(user);
+    var first = start(trainings, user, p);
+    trainings.answer(
+      user,
+      str(first, "id"),
+      Map.of(
+        "turnId",
+        list(first, "turns").get(0).get("id"),
+        "answer",
+        "合成历史回答，重试边界待解释。"
+      )
+    );
+    var live = spy(
+      new ModelService(
+        s,
+        "live",
+        "https://model.example/v1",
+        "synthetic-key",
+        "synthetic-model",
+        "DashScope"
+      )
+    );
+    doReturn(
+      Map.of(
+        "question",
+        "请解释历史回答尚未说明的重试边界？",
+        "topic",
+        "重试边界"
+      )
+    )
+      .when(live)
+      .call(anyString(), any());
+    var next = start(new TrainingService(s, projects, live, payments), user, p);
+    assertEquals("ACTIVE", next.get("status"));
+    assertEquals(
+      "请解释历史回答尚未说明的重试边界？",
+      list(next, "turns").get(0).get("question")
+    );
+    var input = ArgumentCaptor.forClass(Object.class);
+    verify(live).call(anyString(), input.capture());
+    assertTrue(
+      list((Map<String, Object>) input.getValue(), "historyTurns")
+        .stream()
+        .anyMatch(t -> str(t, "answer").contains("合成历史回答"))
+    );
+    var template = new LinkedHashMap<>((Map<String, Object>) input.getValue());
+    template.put("turns", new ArrayList<>());
+    template.put("historyTurns", new ArrayList<>());
+    template.put("trainingHistory", new ArrayList<>());
+    template.put("historyRoundNumber", 1);
+    var rule = ArgumentCaptor.forClass(String.class);
+    verify(live).call(rule.capture(), any());
+    var directory = java.nio.file.Path.of("target", "test-fixtures");
+    try {
+      java.nio.file.Files.createDirectories(directory);
+      java.nio.file.Files.writeString(
+        directory.resolve("history-first-request.json"),
+        s.encode(live.requestBody(rule.getValue(), template))
+      );
+    } catch (java.io.IOException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Test
+  void concurrentIdenticalQuestionsCannotBothBeCommitted() throws Exception {
+    String user = user();
+    var p = project(user);
+    var fake = spy(model);
+    var entered = new CountDownLatch(2);
+    var release = new CountDownLatch(1);
+    doAnswer(invocation -> {
+      entered.countDown();
+      assertTrue(release.await(5, TimeUnit.SECONDS));
+      return new ModelService.GeneratedQuestion(
+        "合成并发首题：如何观察失败结果？",
+        "失败边界"
+      );
+    })
+      .when(fake)
+      .firstDeepQuestion(anyMap());
+    var service = new TrainingService(s, projects, fake, payments);
+    var pool = Executors.newFixedThreadPool(2);
+    try {
+      var a = pool.submit(() -> start(service, user, p));
+      var b = pool.submit(() -> start(service, user, p));
+      assertTrue(entered.await(5, TimeUnit.SECONDS));
+      release.countDown();
+      var results = List.of(
+        a.get(5, TimeUnit.SECONDS),
+        b.get(5, TimeUnit.SECONDS)
+      );
+      assertEquals(
+        1,
+        results
+          .stream()
+          .filter(t -> "ACTIVE".equals(t.get("status")))
+          .count()
+      );
+      assertTrue(
+        list(
+          results
+            .stream()
+            .filter(t -> "FAILED".equals(t.get("status")))
+            .findFirst()
+            .orElseThrow(),
+          "turns"
+        ).isEmpty()
+      );
+      assertEquals(
+        1,
+        s.db.queryForObject(
+          "SELECT COUNT(*) FROM training_question_index WHERE user_id=?",
+          Integer.class,
+          user
+        )
+      );
+    } finally {
+      release.countDown();
+      pool.shutdownNow();
+    }
+  }
+
+  @Test
+  void oldQuestionsOutsidePromptWindowStillHaveExactDuplicateProtection() {
+    String user = user();
+    var p = project(user);
+    var first = start(trainings, user, p);
+    s.db.update(
+      "UPDATE trainings SET created_at=? WHERE id=?",
+      now() - 86400000,
+      first.get("id")
+    );
+    for (int i = 0; i < 7; i++) assertEquals(
+      "ACTIVE",
+      start(trainings, user, p).get("status")
+    );
+    var fake = spy(model);
+    doReturn(
+      new ModelService.GeneratedQuestion(
+        str(list(first, "turns").get(0), "question"),
+        "重复首题"
+      )
+    )
+      .when(fake)
+      .firstDeepQuestion(anyMap());
+    var failed = start(
+      new TrainingService(s, projects, fake, payments),
+      user,
+      p
+    );
+    assertEquals("FAILED", failed.get("status"));
+    assertTrue(list(failed, "turns").isEmpty());
+    assertTrue(
+      list(failed, "historyTurns")
+        .stream()
+        .noneMatch(t -> first.get("id").equals(t.get("trainingId")))
+    );
+  }
 }
