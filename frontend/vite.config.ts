@@ -1,7 +1,8 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { vadAssets } from "./vad-assets";
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), vadAssets()],
   server: {
     port: 5173,
     strictPort: true,
