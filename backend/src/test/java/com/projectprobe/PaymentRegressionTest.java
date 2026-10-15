@@ -69,6 +69,55 @@ class PaymentRegressionTest {
     return u;
   }
 
+  @Test
+  void expiredPaymentWorkerCannotClearOrWriteThroughNewLease() {
+    var pay = new PaymentService(s, config("sandbox"));
+    String user = user();
+    var order = pay.create(user, Map.of("requestKey", id()));
+    String orderId = str(order, "id");
+    String old = pay.leases.acquire(orderId);
+    s.db.update(
+      "UPDATE purchase_orders SET query_lease_until=? WHERE id=?",
+      now() - 1,
+      orderId
+    );
+    String replacement = pay.leases.acquire(orderId);
+    pay.leases.release(orderId, old);
+    assertEquals(
+      replacement,
+      s
+        .one(
+          "SELECT query_lease_token FROM purchase_orders WHERE id=?",
+          orderId
+        )
+        .get("query_lease_token")
+    );
+    assertEquals(
+      409,
+      assertThrows(ResponseStatusException.class, () ->
+        pay.leases.guarded(user, orderId, old, () -> {
+          fail("stale worker must not execute");
+          return null;
+        })
+      )
+        .getStatusCode()
+        .value()
+    );
+    assertEquals(
+      "current",
+      pay.leases.guarded(user, orderId, replacement, () -> "current")
+    );
+    s.db.update(
+      "UPDATE purchase_orders SET query_lease_until=? WHERE id=?",
+      now() - 1,
+      orderId
+    );
+    assertThrows(ResponseStatusException.class, () ->
+      pay.leases.guarded(user, orderId, replacement, () -> "expired")
+    );
+    pay.leases.release(orderId, replacement);
+  }
+
   PaymentSettings config(String mode) {
     var c = new PaymentSettings();
     c.setMode(mode);
@@ -784,7 +833,9 @@ class PaymentRegressionTest {
     assertEquals("LEGACY_PAIR", order.get("product_code"));
     assertEquals(2, order.get("training_limit"));
     assertEquals(false, order.get("lifetime"));
-    var legacyPack = db.queryForMap("SELECT * FROM training_packages WHERE id='p'");
+    var legacyPack = db.queryForMap(
+      "SELECT * FROM training_packages WHERE id='p'"
+    );
     assertEquals("LEGACY_PAIR", legacyPack.get("product_code"));
     assertEquals(0L, legacyPack.get("training_used"));
     assertEquals(false, legacyPack.get("retest_used"));

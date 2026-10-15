@@ -18,14 +18,17 @@ public class PaymentService {
   final Store s;
   final PaymentSettings settings;
   final String mode;
+  final PaymentLease leases;
 
   @Autowired
   PaymentService(Store s, PaymentSettings settings) {
     this.s = s;
+    this.leases = new PaymentLease(s);
     this.settings = settings;
     this.mode = settings.getMode();
-    if (settings.getOrderTtlMinutes() < 1 || settings.getOrderTtlMinutes() > 1440)
-      throw new IllegalArgumentException("订单有效期须为 1–1440 分钟");
+    if (
+      settings.getOrderTtlMinutes() < 1 || settings.getOrderTtlMinutes() > 1440
+    ) throw new IllegalArgumentException("订单有效期须为 1–1440 分钟");
     if (
       !Set.of("mock", "sandbox", "production").contains(mode)
     ) throw new IllegalArgumentException(
@@ -123,8 +126,13 @@ public class PaymentService {
   Map<String, Object> create(String user, Map<String, Object> input) {
     return s.locked(user, () -> {
       String key = required(input, "requestKey", 100);
-      String productCode = input.containsKey("productCode") ? required(input, "productCode", 30) : "TEN_TRAININGS";
-      var product = products().stream().filter(p -> productCode.equals(p.get("code"))).findFirst()
+      String productCode = input.containsKey("productCode")
+        ? required(input, "productCode", 30)
+        : "TEN_TRAININGS";
+      var product = products()
+        .stream()
+        .filter(p -> productCode.equals(p.get("code")))
+        .findFirst()
         .orElseThrow(() -> error(400, "套餐不存在，请刷新后重新选择"));
       var rows = s.db.queryForList(
         "SELECT * FROM purchase_orders WHERE user_id=? AND request_key=?",
@@ -133,7 +141,10 @@ public class PaymentService {
       );
       if (!rows.isEmpty()) {
         requireScope(rows.get(0));
-        if (!productCode.equals(rows.get(0).get("product_code"))) throw error(409, "此订单请求已用于其他套餐，请重新创建");
+        if (!productCode.equals(rows.get(0).get("product_code"))) throw error(
+          409,
+          "此订单请求已用于其他套餐，请重新创建"
+        );
         return order(user, str(rows.get(0), "id"));
       }
       String id = id(),
@@ -152,7 +163,10 @@ public class PaymentService {
         scope(),
         merchantNo,
         now() + settings.getOrderTtlMinutes() * 60000L,
-        productCode, product.get("name"), product.get("trainingLimit"), product.get("lifetime")
+        productCode,
+        product.get("name"),
+        product.get("trainingLimit"),
+        product.get("lifetime")
       );
       return order(user, id);
     });
@@ -164,21 +178,46 @@ public class PaymentService {
       user,
       id
     );
-    if (ownsScope(o) && "PENDING".equals(o.get("status")) && ((Number)o.get("expires_at")).longValue() <= now()) {
+    if (
+      ownsScope(o) &&
+      "PENDING".equals(o.get("status")) &&
+      ((Number) o.get("expires_at")).longValue() <= now()
+    ) {
       expireOrder(id);
-      o = s.one("SELECT * FROM purchase_orders WHERE user_id=? AND id=?", user, id);
+      o = s.one(
+        "SELECT * FROM purchase_orders WHERE user_id=? AND id=?",
+        user,
+        id
+      );
     }
     o.put("can_operate", ownsScope(o));
-    o.put("can_pay", ownsScope(o) && "PENDING".equals(o.get("status")) && ((Number)o.get("expires_at")).longValue() > now());
+    o.remove("query_lease_token");
+    o.put(
+      "can_pay",
+      ownsScope(o) &&
+        "PENDING".equals(o.get("status")) &&
+        ((Number) o.get("expires_at")).longValue() > now()
+    );
     return o;
   }
 
   void expireOrder(String id) {
-    s.db.update("UPDATE purchase_orders SET status='EXPIRED' WHERE id=? AND status='PENDING' AND expires_at<=? AND mode=? AND account_scope=?", id, now(), mode, scope());
+    s.db.update(
+      "UPDATE purchase_orders SET status='EXPIRED' WHERE id=? AND status='PENDING' AND expires_at<=? AND mode=? AND account_scope=?",
+      id,
+      now(),
+      mode,
+      scope()
+    );
   }
 
   void expireDue() {
-    for (var o : s.db.queryForList("SELECT id FROM purchase_orders WHERE mode=? AND account_scope=? AND status='PENDING' AND expires_at<=? ORDER BY expires_at LIMIT 100", mode, scope(), now()))
+    for (var o : s.db.queryForList(
+      "SELECT id FROM purchase_orders WHERE mode=? AND account_scope=? AND status='PENDING' AND expires_at<=? ORDER BY expires_at LIMIT 100",
+      mode,
+      scope(),
+      now()
+    ))
       expireOrder(str(o, "id"));
   }
 
@@ -193,10 +232,34 @@ public class PaymentService {
 
   List<Map<String, Object>> products() {
     return List.of(
-      Map.of("code", "TEN_TRAININGS", "name", "10 次训练套餐", "amountCents", settings.getPriceCents(),
-        "trainingLimit", 10, "lifetime", false, "description", "深挖与关联复测共用 10 次，无时间限制"),
-      Map.of("code", "LIFETIME", "name", "永久训练套餐", "amountCents", 999900,
-        "trainingLimit", 0, "lifetime", true, "description", "永久不限训练次数，无自动续费")
+      Map.of(
+        "code",
+        "TEN_TRAININGS",
+        "name",
+        "10 次训练套餐",
+        "amountCents",
+        settings.getPriceCents(),
+        "trainingLimit",
+        10,
+        "lifetime",
+        false,
+        "description",
+        "深挖与关联复测共用 10 次，无时间限制"
+      ),
+      Map.of(
+        "code",
+        "LIFETIME",
+        "name",
+        "永久训练套餐",
+        "amountCents",
+        999900,
+        "trainingLimit",
+        0,
+        "lifetime",
+        true,
+        "description",
+        "永久不限训练次数，无自动续费"
+      )
     );
   }
 
@@ -205,37 +268,96 @@ public class PaymentService {
   }
 
   static boolean available(Map<String, Object> pack, String kind) {
-    if (legacy(pack)) return !Boolean.TRUE.equals(pack.get(kind.equals("DEEP") ? "deep_used" : "retest_used"));
-    return Boolean.TRUE.equals(pack.get("lifetime")) ||
-      ((Number) pack.get("training_used")).longValue() < ((Number) pack.get("training_limit")).longValue();
+    if (legacy(pack)) return !Boolean.TRUE.equals(
+      pack.get(kind.equals("DEEP") ? "deep_used" : "retest_used")
+    );
+    return (
+      Boolean.TRUE.equals(pack.get("lifetime")) ||
+      ((Number) pack.get("training_used")).longValue() <
+        ((Number) pack.get("training_limit")).longValue()
+    );
   }
 
   Map<String, Object> quota(List<Map<String, Object>> packs) {
-    long shared = 0, deep = 0, retest = 0;
+    long shared = 0,
+      deep = 0,
+      retest = 0;
     boolean unlimited = false;
     for (var pack : packs) {
       if (legacy(pack)) {
         if (available(pack, "DEEP")) deep++;
         if (available(pack, "RETEST")) retest++;
       } else if (Boolean.TRUE.equals(pack.get("lifetime"))) unlimited = true;
-      else shared += ((Number)pack.get("training_limit")).longValue() - ((Number)pack.get("training_used")).longValue();
+      else shared +=
+        ((Number) pack.get("training_limit")).longValue() -
+        ((Number) pack.get("training_used")).longValue();
     }
-    return Map.of("unlimited", unlimited, "sharedRemaining", shared, "legacyDeepRemaining", deep,
-      "legacyRetestRemaining", retest, "deepAvailable", shared + deep, "retestAvailable", shared + retest);
+    return Map.of(
+      "unlimited",
+      unlimited,
+      "sharedRemaining",
+      shared,
+      "legacyDeepRemaining",
+      deep,
+      "legacyRetestRemaining",
+      retest,
+      "deepAvailable",
+      shared + deep,
+      "retestAvailable",
+      shared + retest
+    );
   }
 
   Map<String, Object> shop(String user) {
+    return shop(user, false);
+  }
+
+  Map<String, Object> shop(String user, boolean summary) {
+    var packs = packages(user);
+    if (summary) return Map.of(
+      "mode",
+      mode,
+      "configured",
+      configured(),
+      "quota",
+      quota(packs),
+      "packages",
+      packs,
+      "orders",
+      List.of(),
+      "product",
+      products().get(0),
+      "products",
+      products()
+    );
+    s.db.update(
+      "UPDATE purchase_orders SET status='EXPIRED' WHERE user_id=? AND status='PENDING' AND expires_at<=? AND mode=? AND account_scope=?",
+      user,
+      now(),
+      mode,
+      scope()
+    );
     var orders = s.db.queryForList(
       "SELECT * FROM purchase_orders WHERE user_id=? ORDER BY created_at DESC",
       user
     );
-    for (int i=0; i<orders.size(); i++) orders.set(i, order(user, str(orders.get(i), "id")));
-    var packs = packages(user);
+    for (var order : orders) {
+      order.remove("query_lease_token");
+      order.put("can_operate", ownsScope(order));
+      order.put(
+        "can_pay",
+        ownsScope(order) &&
+          "PENDING".equals(order.get("status")) &&
+          ((Number) order.get("expires_at")).longValue() > now()
+      );
+    }
     return Map.of(
       "product",
       products().get(0),
-      "products", products(),
-      "quota", quota(packs),
+      "products",
+      products(),
+      "quota",
+      quota(packs),
       "mode",
       mode,
       "configured",
@@ -317,10 +439,9 @@ public class PaymentService {
           orderId
         ) == 1
       ) return null;
-      if (!Set.of("PENDING", "EXPIRED").contains(str(order, "status"))) throw error(
-        409,
-        "订单状态不允许发放权益"
-      );
+      if (
+        !Set.of("PENDING", "EXPIRED").contains(str(order, "status"))
+      ) throw error(409, "订单状态不允许发放权益");
       s.db.update(
         "UPDATE purchase_orders SET status='PAID',trade_no=?,query_status='PAID',query_error='' WHERE id=?",
         transactionId,
@@ -331,7 +452,10 @@ public class PaymentService {
         "INSERT INTO training_packages(id,user_id,order_id,product_code,training_limit,lifetime) VALUES (?,?,?,?,?,?)",
         packageId,
         order.get("user_id"),
-        orderId, order.get("product_code"), order.get("training_limit"), order.get("lifetime")
+        orderId,
+        order.get("product_code"),
+        order.get("training_limit"),
+        order.get("lifetime")
       );
       s.db.update(
         "INSERT INTO entitlement_events VALUES (?,?,?,?,?)",
@@ -350,7 +474,10 @@ public class PaymentService {
     var o = order(user, id);
     requireScope(o);
     if ("PAID".equals(o.get("status"))) return o;
-    if (!Boolean.TRUE.equals(o.get("can_pay"))) throw error(409, "订单已过期或不可付款，请创建新订单；已有付款请查询确认");
+    if (!Boolean.TRUE.equals(o.get("can_pay"))) throw error(
+      409,
+      "订单已过期或不可付款，请创建新订单；已有付款请查询确认"
+    );
     settle(
       id,
       "MOCK-" + id,
@@ -386,7 +513,11 @@ public class PaymentService {
 
   String checkout(String user, String id) {
     return s.locked(user, () -> {
-      s.one("SELECT id FROM purchase_orders WHERE user_id=? AND id=? FOR UPDATE", user, id);
+      s.one(
+        "SELECT id FROM purchase_orders WHERE user_id=? AND id=? FOR UPDATE",
+        user,
+        id
+      );
       return checkoutLocked(user, id);
     });
   }
@@ -396,7 +527,10 @@ public class PaymentService {
     requireScope(o);
     if (mode.equals("mock")) throw error(409, "当前是模拟支付环境");
     requireConfigured();
-    if (!Boolean.TRUE.equals(o.get("can_pay"))) throw error(409, "订单已过期或不可付款，请创建新订单；已有付款请查询确认");
+    if (!Boolean.TRUE.equals(o.get("can_pay"))) throw error(
+      409,
+      "订单已过期或不可付款，请创建新订单；已有付款请查询确认"
+    );
     if (!"PENDING".equals(o.get("status"))) throw error(
       409,
       "此订单不能发起支付"
@@ -417,7 +551,11 @@ public class PaymentService {
             "product_code",
             "FAST_INSTANT_TRADE_PAY",
             "timeout_express",
-            Math.max(1, (((Number)o.get("expires_at")).longValue()-now()+59999)/60000) + "m"
+            Math.max(
+              1,
+              (((Number) o.get("expires_at")).longValue() - now() + 59999) /
+                60000
+            ) + "m"
           )
         )
       );
@@ -452,14 +590,7 @@ public class PaymentService {
     requireScope(o);
     if (mode.equals("mock")) throw error(409, "模拟订单不能查询支付宝");
     requireConfigured();
-    if (
-      s.db.update(
-        "UPDATE purchase_orders SET query_lease_until=? WHERE id=? AND query_lease_until<?",
-        now() + 25000,
-        id,
-        now()
-      ) != 1
-    ) throw error(409, "订单正在查询，请稍后刷新");
+    String lease = leases.acquire(id);
     try {
       var r = new AlipayTradeQueryRequest();
       r.setBizContent(
@@ -469,7 +600,10 @@ public class PaymentService {
       var response = client().execute(r);
       if (!response.isSuccess()) {
         if ("ACQ.TRADE_NOT_EXIST".equals(response.getSubCode())) {
-          recordQuery(id, "NOT_CREATED", "");
+          leases.guarded(user, id, lease, () -> {
+            recordQuery(id, "NOT_CREATED", "");
+            return null;
+          });
           return order(user, id);
         }
         throw error(503, "支付宝查询失败，请稍后重试");
@@ -493,28 +627,35 @@ public class PaymentService {
           ).equals(root.path(field).asText())
         ) throw error(503, "查询交易归属不匹配");
       validateTrade(o, response.getTradeNo(), cents(response.getTotalAmount()));
-      applyStatus(
-        o,
-        response.getTradeNo(),
-        response.getTradeStatus(),
-        cents(response.getTotalAmount())
-      );
+      leases.guarded(user, id, lease, () -> {
+        applyStatus(
+          o,
+          response.getTradeNo(),
+          response.getTradeStatus(),
+          cents(response.getTotalAmount())
+        );
+        return null;
+      });
       return order(user, id);
     } catch (Exception e) {
-      recordQuery(
-        id,
-        "QUERY_FAILED",
-        "支付宝查询未能确认付款；请重试或联系服务方"
-      );
+      try {
+        leases.guarded(user, id, lease, () -> {
+          recordQuery(
+            id,
+            "QUERY_FAILED",
+            "支付宝查询未能确认付款；请重试或联系服务方"
+          );
+          return null;
+        });
+      } catch (org.springframework.web.server.ResponseStatusException stale) {
+        throw stale;
+      }
       throw error(
         503,
         "支付宝查询未能确认付款；订单与权益未按失败查询变更，请重试"
       );
     } finally {
-      s.db.update(
-        "UPDATE purchase_orders SET query_lease_until=0 WHERE id=?",
-        id
-      );
+      leases.release(id, lease);
     }
   }
 
