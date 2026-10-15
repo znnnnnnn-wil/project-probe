@@ -29,6 +29,7 @@ export function ResumeImport({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [duplicate, setDuplicate] = useState(false);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [filename, setFilename] = useState("");
   const [candidates, setCandidates] = useState<ResumeCandidate[] | null>(null);
   const [consent, setConsent] = useState(false);
@@ -36,6 +37,7 @@ export function ResumeImport({
   const read = async (file: File) => {
     setError("");
     setDuplicate(false);
+    setWarnings([]);
     setCandidates(null);
     if (file.size > 5 * 1024 * 1024 || !/\.(pdf|docx|txt)$/i.test(file.name)) {
       setError("请上传5MB以内的PDF、DOCX或UTF-8 TXT简历");
@@ -49,10 +51,12 @@ export function ResumeImport({
       const result = await upload<{
         projects: ResumeCandidate[];
         duplicate: boolean;
+        warnings?: string[];
       }>("/resume/import", file, file.name);
       if (serial === request.current) {
         setCandidates(result.projects);
         setDuplicate(result.duplicate === true);
+        setWarnings(result.warnings ?? []);
         if (!result.projects.length)
           setError("未识别到项目经历，可换一份简历或手动填写");
       }
@@ -127,6 +131,13 @@ export function ResumeImport({
           这份简历已上传过，已读取上次识别结果，不重复调用模型或消耗识别次数。
         </p>
       )}
+      {warnings.length > 0 && (
+        <div className="input-status" role="status">
+          {warnings.map((warning, index) => (
+            <p key={index}>{warning}</p>
+          ))}
+        </div>
+      )}
       {!!candidates?.length && (
         <div className="resume-candidates">
           <div className="panel-heading">
@@ -139,6 +150,7 @@ export function ResumeImport({
               onClick={() => {
                 setCandidates(null);
                 setDuplicate(false);
+                setWarnings([]);
               }}
             >
               <X size={16} />

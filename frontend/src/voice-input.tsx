@@ -9,6 +9,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { api, upload } from "./api";
+import type { VoiceActivity } from "./voice-activity";
 
 export function encodeWav(chunks: Float32Array[], sampleRate: number): Blob {
   const count = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -70,12 +71,17 @@ export function VoiceInput({
   const [transcript, setTranscript] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const [level, setLevel] = useState(0);
-  const [consent, setConsent] = useState(false);
+  const [notice, setNotice] = useState("");
+  const speechDetected = useRef(false);
+  const inFlight = useRef(false);
+  const current = useRef({ remaining, onAppend, disabled });
+  current.current = { remaining, onAppend, disabled };
   const resources = useRef<{
     stream?: MediaStream;
     context?: AudioContext;
     node?: AudioWorkletNode;
     timer?: number;
+    vad?: VoiceActivity;
   }>({});
   const chunks = useRef<Float32Array[]>([]);
   const samples = useRef(0);
@@ -90,6 +96,7 @@ export function VoiceInput({
     window.clearInterval(resources.current.timer);
     resources.current.node?.disconnect();
     resources.current.stream?.getTracks().forEach((track) => track.stop());
+    void resources.current.vad?.destroy().catch(() => {});
     void resources.current.context?.close().catch(() => {});
     resources.current = {};
   };
@@ -112,7 +119,7 @@ export function VoiceInput({
   useEffect(() => {
     onBusy(["requesting", "recording", "transcribing"].includes(state));
   }, [state, onBusy]);
-  const stop = () => {
+  const stop = (speechAudio?: Float32Array) => {
     if (!recording.current) return;
     const rate = resources.current.context!.sampleRate;
     release();
@@ -121,7 +128,10 @@ export function VoiceInput({
       setState("idle");
       return;
     }
-    blob.current = encodeWav(chunks.current, rate);
+    blob.current = encodeWav(
+      speechAudio ? [speechAudio] : chunks.current,
+      speechAudio ? 16000 : rate,
+    );
     chunks.current = [];
     if (blob.current.size > 6 * 1024 * 1024) {
       blob.current = null;
@@ -134,8 +144,10 @@ export function VoiceInput({
     setAudioUrl(url.current);
     setState("recorded");
     setLevel(0);
+    void transcribe();
   };
   const discard = () => {
+    setError("");
     release();
     chunks.current = [];
     blob.current = null;
@@ -149,11 +161,14 @@ export function VoiceInput({
     setState("idle");
   };
   const start = async () => {
+    if (recording.current || inFlight.current || resources.current.stream)
+      return;
     if (!navigator.mediaDevices?.getUserMedia || !window.AudioWorkletNode) {
       setError("当前浏览器不支持录音，请改用新版浏览器或文字回答");
       return;
     }
     setError("");
+    setNotice("");
     setState("requesting");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -177,10 +192,66 @@ export function VoiceInput({
         return;
       }
       await context.resume();
+      try {
+        const creation = import("./voice-activity").then(({ VoiceActivity }) =>
+          VoiceActivity.create(
+            context.sampleRate,
+            () => {
+              speechDetected.current = true;
+            },
+            (audio) => {
+              if (recording.current) stop(audio);
+            },
+            () => {
+              if (!mounted.current || !recording.current) return;
+              const failed = resources.current.vad;
+              resources.current.vad = undefined;
+              void failed?.destroy().catch(() => {});
+              setError("语音活动检测暂不可用，可手动结束录音");
+            },
+          ),
+        );
+        let abandoned = false;
+        let timeout: number | undefined;
+        const guarded = creation.then((vad) => {
+          if (abandoned) {
+            void vad.destroy().catch(() => {});
+            throw new Error("VAD loading expired");
+          }
+          return vad;
+        });
+        let vad: VoiceActivity;
+        try {
+          vad = await Promise.race([
+            guarded,
+            new Promise<never>((_, reject) => {
+              timeout = window.setTimeout(() => {
+                abandoned = true;
+                reject(new Error("VAD loading timed out"));
+              }, 15000);
+            }),
+          ]);
+        } finally {
+          window.clearTimeout(timeout);
+        }
+        if (!mounted.current) {
+          await vad.destroy();
+          release();
+          return;
+        }
+        resources.current.vad = vad;
+      } catch {
+        if (!mounted.current) {
+          release();
+          return;
+        }
+        setError("语音活动检测加载失败，可手动结束录音");
+      }
       const node = new AudioWorkletNode(context, "voice-recorder");
       resources.current.node = node;
       chunks.current = [];
       samples.current = 0;
+      speechDetected.current = false;
       recording.current = true;
       node.port.onmessage = (event) => {
         if (!recording.current) return;
@@ -193,15 +264,11 @@ export function VoiceInput({
           chunks.current.push(chunk.slice(0, allowed));
           samples.current += allowed;
         }
-        setLevel(
-          Math.min(
-            100,
-            Math.sqrt(
-              chunk.reduce((sum, value) => sum + value * value, 0) /
-                chunk.length,
-            ) * 400,
-          ),
+        const rms = Math.sqrt(
+          chunk.reduce((sum, value) => sum + value * value, 0) / chunk.length,
         );
+        setLevel(Math.min(100, rms * 400));
+        resources.current.vad?.feed(chunk.slice(0, allowed));
         if (samples.current >= context.sampleRate * 180) stop();
       };
       context.createMediaStreamSource(stream).connect(node);
@@ -211,6 +278,15 @@ export function VoiceInput({
       const started = performance.now();
       resources.current.timer = window.setInterval(() => {
         setSeconds(Math.floor((performance.now() - started) / 1000));
+        if (
+          resources.current.vad &&
+          !speechDetected.current &&
+          performance.now() - started >= 10000
+        ) {
+          discard();
+          setError("未检测到语音，请检查麦克风后重新录音");
+          return;
+        }
         if (performance.now() - started >= 180000) stop();
       }, 250);
       setSeconds(0);
@@ -227,7 +303,8 @@ export function VoiceInput({
     }
   };
   const transcribe = async () => {
-    if (!blob.current) return;
+    if (!blob.current || inFlight.current) return;
+    inFlight.current = true;
     setError("");
     setState("transcribing");
     try {
@@ -237,12 +314,27 @@ export function VoiceInput({
         "answer.wav",
         { turnId },
       );
-      if (mounted.current) setTranscript(result.text);
+      if (mounted.current) {
+        const text = result.text.trim();
+        if (!text) throw new Error("没有识别到语音，请重新录音");
+        if (
+          text.length > current.current.remaining ||
+          current.current.disabled
+        ) {
+          setTranscript(text);
+          setError("转写已保留，当前回答无法容纳全文，请缩短后加入");
+        } else {
+          current.current.onAppend(text);
+          discard();
+          setNotice("语音已填入回答");
+        }
+      }
     } catch (cause) {
       if (mounted.current)
         setError(cause instanceof Error ? cause.message : "转写失败，可重试");
     } finally {
-      if (mounted.current) setState("recorded");
+      inFlight.current = false;
+      if (mounted.current && blob.current) setState("recorded");
     }
   };
   const active = ["requesting", "recording", "transcribing"].includes(state);
@@ -256,12 +348,13 @@ export function VoiceInput({
         {state === "idle" && (
           <button
             type="button"
-            className="button secondary"
-            disabled={disabled || !enabled || !consent}
+            className="icon-button"
+            title="开始录音（云端语音转写）"
+            aria-label="开始录音"
+            disabled={disabled || !enabled}
             onClick={() => void start()}
           >
             <Mic size={16} />
-            开始录音
           </button>
         )}
         {state === "requesting" && (
@@ -273,23 +366,19 @@ export function VoiceInput({
         {state === "recording" && (
           <button
             type="button"
-            className="button recording-button"
-            onClick={stop}
+            className="icon-button recording-button"
+            title="结束录音"
+            aria-label="结束录音"
+            onClick={() => stop()}
           >
             <Square size={15} />
-            结束录音
           </button>
         )}
       </div>
-      {state === "idle" && enabled && (
-        <label className="checkbox">
-          <input
-            type="checkbox"
-            checked={consent}
-            onChange={(event) => setConsent(event.target.checked)}
-          />
-          同意将本段录音发送至百炼进行语音识别
-        </label>
+      {notice && (
+        <p className="input-status" role="status">
+          {notice}
+        </p>
       )}
       {enabled === false && <p className="input-status">语音识别暂不可用</p>}
       {state === "recording" && (
@@ -317,8 +406,10 @@ export function VoiceInput({
           <div className="input-tool-actions">
             <button
               type="button"
-              className="button secondary"
+              className="icon-button"
               disabled={active || disabled}
+              title="重试转写"
+              aria-label="重试转写"
               onClick={() => void transcribe()}
             >
               {state === "transcribing" ? (
@@ -326,11 +417,6 @@ export function VoiceInput({
               ) : (
                 <FileText size={16} />
               )}
-              {state === "transcribing"
-                ? "正在转写"
-                : transcript
-                  ? "重新转写"
-                  : "转为文字"}
             </button>
             <button
               type="button"
@@ -344,6 +430,11 @@ export function VoiceInput({
             </button>
           </div>
         </div>
+      )}
+      {state === "transcribing" && (
+        <p className="input-status" role="status">
+          正在转写
+        </p>
       )}
       {transcript && (
         <div className="transcript-preview">
@@ -369,7 +460,7 @@ export function VoiceInput({
                 transcript.trim().length > remaining
               }
               onClick={() => {
-                onAppend(transcript.trim());
+                current.current.onAppend(transcript.trim());
                 discard();
               }}
             >
