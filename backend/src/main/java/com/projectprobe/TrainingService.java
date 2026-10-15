@@ -502,10 +502,16 @@ public class TrainingService {
         var q = switch (str(claim, "operation")) {
           case "FIRST_QUESTION" -> model.firstRetestQuestion(claim);
           case "FIRST_DEEP_QUESTION" -> model.firstDeepQuestion(claim);
+          case "REVISE_QUESTION" -> model.reviseQuestion(claim);
           default -> model.question(claim);
         };
         var turns = list(claim, "turns");
-        turns.add(turn(q.question(), q.topic()));
+        if ("REVISE_QUESTION".equals(claim.get("operation"))) {
+          var current = turns.get(turns.size() - 1);
+          list(current, "questionHistory").add(Map.of("question", current.get("question"),
+            "topic", current.get("topic"), "revisedAt", now()));
+          current.put("question", q.question()); current.put("topic", q.topic());
+        } else turns.add(turn(q.question(), q.topic()));
       }
       return s.locked(user, () -> {
         var r = row(user, id);
@@ -525,12 +531,14 @@ public class TrainingService {
               str(last, "question")
             )
           ) throw error(503, "模型重复历史问题，请重试");
+          var indexed = new LinkedHashMap<>(last);
+          if ("REVISE_QUESTION".equals(claim.get("operation"))) indexed.put("id", id());
           history.index(
             user,
             id,
             str(r, "project_id"),
             str(claim, "historyKey"),
-            last
+            indexed
           );
         }
         claim.remove("error");

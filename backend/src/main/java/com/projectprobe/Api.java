@@ -16,6 +16,7 @@ public class Api {
   final ModelService model;
   final PaymentOperations paymentOperations;
   final InputService inputs;
+  final TrainingSupport support;
 
   Api(
     Store s,
@@ -25,7 +26,8 @@ public class Api {
     PaymentService payments,
     ModelService model,
     PaymentOperations paymentOperations,
-    InputService inputs
+    InputService inputs,
+    TrainingSupport support
   ) {
     this.s = s;
     this.auth = auth;
@@ -35,6 +37,7 @@ public class Api {
     this.model = model;
     this.paymentOperations = paymentOperations;
     this.inputs = inputs;
+    this.support = support;
   }
 
   @GetMapping("/health")
@@ -213,6 +216,11 @@ public class Api {
   @PostMapping("/trainings/{id}/finish")
   Object finish(HttpServletRequest r, @PathVariable String id) {
     return trainings.finish(auth.user(r), id);
+  }
+
+  @PostMapping("/trainings/{id}/support")
+  Object support(HttpServletRequest r, @PathVariable String id, @RequestBody Map<String, Object> b) {
+    return support.submit(auth.user(r), id, b);
   }
 
   @PostMapping("/trainings/{id}/plan")

@@ -14,6 +14,7 @@ import type { Training } from "./types";
 import { VoiceInput } from "./voice-input";
 import { Button, Loading, PageHead, sourceLabel, statusLabel } from "./ui";
 import type { Actions } from "./ui";
+import { TrainingHelp } from "./training-help";
 
 export function Interview({ id, run, busy }: Actions & { id: string }) {
   const [voiceBusy, setVoiceBusy] = useState(false);
@@ -194,7 +195,10 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
             )}
           </div>
           {t.status === "ACTIVE" && turn ? (
-            <form
+            <><TrainingHelp training={t} run={run} busy={busy || voiceBusy} onUpdated={setT} onUnknown={() => {
+              if (!answer.trim() || window.confirm("将以暂时不会提交本题，已有草稿不会作为回答提交。确认继续？"))
+                action("answer", { turnId: turn.id, answer: "暂时不会，这部分需要补充。" });
+            }} /><form
               className="panel answer-panel"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -269,7 +273,7 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
               >
                 结束训练并复盘（仅使用已提交回答）
               </button>
-            </form>
+            </form></>
           ) : (
             <div className="panel recovery">
               <h3>
