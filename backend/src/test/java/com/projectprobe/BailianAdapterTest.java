@@ -9,6 +9,94 @@ import org.junit.jupiter.api.Test;
 class BailianAdapterTest {
 
   @Test
+  void globalConcurrencyRejectsBeforeCallingProvider() throws Exception {
+    var model = new ModelService(
+      mock(Store.class),
+      "live",
+      "https://example.invalid",
+      "synthetic",
+      "synthetic",
+      "DashScope"
+    );
+    model.modelSlots.acquire(4);
+    try {
+      assertEquals(
+        429,
+        assertThrows(
+          org.springframework.web.server.ResponseStatusException.class,
+          () -> model.call("合成请求", Map.of())
+        )
+          .getStatusCode()
+          .value()
+      );
+    } finally {
+      model.modelSlots.release(4);
+    }
+  }
+
+  @Test
+  void questionContextKeepsEvidenceOnceAndOmitsInternalState() {
+    var model = new ModelService(
+      mock(Store.class),
+      "demo",
+      "https://example.invalid",
+      "",
+      "synthetic",
+      "DashScope"
+    );
+    var turn = Map.<String, Object>of(
+      "id",
+      "old-turn",
+      "question",
+      "如何确认重试结果？",
+      "answer",
+      "合成回答"
+    );
+    var round = Map.<String, Object>of(
+      "trainingId",
+      "old-training",
+      "turns",
+      List.of(turn)
+    );
+    var saved = new LinkedHashMap<String, Object>(
+      Map.of(
+        "project",
+        Map.of("name", "合成项目"),
+        "turns",
+        List.of(),
+        "historyTurns",
+        List.of(turn),
+        "trainingHistory",
+        List.of(round),
+        "reportPlan",
+        List.of(Map.of("note", "私人复盘笔记")),
+        "error",
+        "内部错误",
+        "operation",
+        "QUESTION",
+        "interviewFacts",
+        List.of(turn)
+      )
+    );
+    var input = model.questionInput(saved);
+    assertEquals(List.of(turn), input.get("historyTurns"));
+    assertFalse(
+      ((Map<?, ?>) ((List<?>) input.get("trainingHistory")).get(0)).containsKey(
+        "turns"
+      )
+    );
+    assertFalse(input.containsKey("reportPlan"));
+    assertFalse(input.containsKey("error"));
+    assertFalse(input.containsKey("operation"));
+    assertFalse(input.containsKey("interviewFacts"));
+    assertEquals(List.of(turn), round.get("turns"));
+    assertEquals(
+      "私人复盘笔记",
+      ((Map<?, ?>) ((List<?>) saved.get("reportPlan")).get(0)).get("note")
+    );
+  }
+
+  @Test
   void reportInputExposesOnlyEligibleEvidenceAndNoTrainingMetadata() {
     var model = new ModelService(
       mock(Store.class),
