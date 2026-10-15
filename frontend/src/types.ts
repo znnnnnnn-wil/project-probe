@@ -102,6 +102,8 @@ export type TrainingSummary = Pick<
   | "createdAt"
   | "historyKey"
   | "historyRoundNumber"
+  | "focus"
+  | "parentId"
   | "retestEntry"
   | "packageId"
   | "leaseUntil"
