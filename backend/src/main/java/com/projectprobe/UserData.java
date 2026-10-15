@@ -17,6 +17,7 @@ class UserData {
   }
   void eraseProject(String user, String projectId) {
     projects.get(user, projectId);
+    s.db.update("DELETE FROM user_feedback WHERE user_id=? AND training_id IN (SELECT id FROM trainings WHERE project_id=?)", user, projectId);
     s.db.update("DELETE FROM report_views WHERE user_id=? AND training_id IN (SELECT id FROM trainings WHERE project_id=?)", user, projectId);
     s.db.update("UPDATE project_trials SET body='{}',status='CLEARED',lease_token=NULL,lease_until=0 WHERE user_id=? AND project_id=?", user, projectId);
     s.db.update("DELETE FROM answer_drafts WHERE training_id IN (SELECT id FROM trainings WHERE user_id=? AND project_id=?)", user, projectId);
@@ -46,6 +47,7 @@ class UserData {
       if (!"注销账户".equals(str(input, "confirmation"))) throw error(400, "请输入注销账户确认");
       for (var row : s.db.queryForList("SELECT id FROM projects WHERE user_id=?", user)) eraseProject(user, str(row, "id"));
       s.db.update("DELETE FROM resume_import_cache WHERE user_id=?", user);
+      s.db.update("DELETE FROM user_feedback WHERE user_id=?", user);
       s.db.update("DELETE FROM account_recovery WHERE user_id=?", user);
       s.db.update("DELETE FROM auth_sessions WHERE user_id=?", user);
       s.db.update("UPDATE app_users SET username=?,password_hash=? WHERE id=?", "closed-" + id(), security.auth.encoder.encode(id()), user);
