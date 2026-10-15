@@ -18,6 +18,7 @@ import { ResumeImport } from "./resume-import";
 import { Button, Loading, PageHead, sourceLabel } from "./ui";
 import type { Actions } from "./ui";
 import { useMounted } from "./use-read-scope";
+import { ProjectPractice } from "./project-practice";
 
 const fields: [keyof Project, string, string][] = [
   ["name", "项目名称", "例如：校园自习室预约系统"],
@@ -61,6 +62,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
   const [shop, setShop] = useState<Shop | null>(null);
   const [draftNotice, setDraftNotice] = useState("");
   const [factsDirty, setFactsDirty] = useState(false);
+  const [expanded, setExpanded] = useState(id !== "new");
   const draftKey = "project-draft:" + id;
   const factDraftKey = "fact-draft:" + id;
   const restore = (project: Project) => {
@@ -182,7 +184,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           projectId: id,
           parentId,
           exerciseMode, difficulty,
-          requestKey: (parentId ? startKey + "-retest-" + parentId : startKey) + exerciseMode + difficulty,
+          requestKey: (parentId ? startKey.slice(0, 16) + "-retest-" + parentId : startKey) + exerciseMode + difficulty,
         });
         if (mounted.current)
           go((t.status === "COMPLETED" ? "/report/" : "/trainings/") + t.id);
@@ -294,10 +296,10 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
             }}
           >
             <div className="form-fields">
-              {fields.map(([key, label, placeholder], i) => (
+              {fields.filter(([key]) => expanded || ["name", "targetRole", "responsibility"].includes(key)).map(([key, label, placeholder], i) => (
                 <label key={key} className={i < 3 ? "" : "wide"}>
                   {label}
-                  {i < 3 ? (
+                  {["name", "targetRole", "stack"].includes(key) ? (
                     <input
                       aria-label={label}
                       value={String(p[key] ?? "")}
@@ -326,6 +328,10 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
                 </label>
               ))}
             </div>
+            <button type="button" className="text-link" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
+              {expanded ? "收起补充材料" : "展开技术栈、实现与验证等补充材料"}
+            </button>
+            <p>可以先填写项目名称和个人职责并保存，再体验一题；完整训练前可继续补充和核对。</p>
             <div className="form-bottom">
               <span>
                 {dirty ? "有尚未保存的修改" : "材料已载入；保存后可提取事实"}
@@ -467,6 +473,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           )}
         </div>
         <aside className="training-aside">
+          {id !== "new" && <ProjectPractice projectId={id} disabled={dirty || factsDirty} run={run} busy={busy} />}
           <div className="training-readiness">
             <h2>本次训练</h2>
             <ul className="readiness-list">
