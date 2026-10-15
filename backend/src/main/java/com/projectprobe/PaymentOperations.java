@@ -29,22 +29,15 @@ public class PaymentOperations {
     return o;
   }
 
-  void acquire(String id) {
-    if (
-      s.db.update(
-        "UPDATE purchase_orders SET query_lease_until=? WHERE id=? AND query_lease_until<?",
-        now() + 25000,
-        id,
-        now()
-      ) != 1
-    ) throw error(409, "订单正在处理，请稍后查询");
-  }
-
-  void release(String id) {
-    s.db.update(
-      "UPDATE purchase_orders SET query_lease_until=0 WHERE id=?",
-      id
-    );
+  void markUnknown(String user, String id, String lease) {
+    try {
+      pay.leases.guarded(user, id, lease, () -> {
+        unknown(id);
+        return null;
+      });
+    } catch (org.springframework.web.server.ResponseStatusException stale) {
+      /* 新执行者负责后续确认。 */
+    }
   }
 
   JsonNode body(String raw, String name, Map<String, Object> o)
@@ -73,12 +66,18 @@ public class PaymentOperations {
   Map<String, Object> closeExpired(String user, String id) {
     var o = pay.order(user, id);
     pay.requireScope(o);
-    if (!pay.settings.isExpirySyncEnabled() || !"EXPIRED".equals(o.get("status"))) throw error(409, "未启用过期关单或订单未过期");
+    if (
+      !pay.settings.isExpirySyncEnabled() || !"EXPIRED".equals(o.get("status"))
+    ) throw error(409, "未启用过期关单或订单未过期");
     pay.requireConfigured();
     return closeVerified(user, id, o);
   }
 
-  Map<String, Object> closeVerified(String user, String id, Map<String,Object> o) {
+  Map<String, Object> closeVerified(
+    String user,
+    String id,
+    Map<String, Object> o
+  ) {
     if ("CLOSED".equals(o.get("status"))) return o;
     if (!Set.of("PENDING", "EXPIRED").contains(str(o, "status"))) throw error(
       409,
@@ -87,14 +86,20 @@ public class PaymentOperations {
     // Query first: a lost successful-payment notification must not be treated as unpaid.
     pay.sync(user, id);
     o = pay.order(user, id);
-    if ("EXPIRED".equals(o.get("status")) && "NOT_CREATED".equals(o.get("query_status"))) return o;
-    if ("PAID".equals(o.get("status"))) throw error(409, "订单已付款，不能关闭");
+    if (
+      "EXPIRED".equals(o.get("status")) &&
+      "NOT_CREATED".equals(o.get("query_status"))
+    ) return o;
+    if ("PAID".equals(o.get("status"))) throw error(
+      409,
+      "订单已付款，不能关闭"
+    );
     if ("CLOSED".equals(o.get("status"))) return o;
     if (
       !Set.of("PENDING", "EXPIRED").contains(str(o, "status")) ||
       !"WAIT_BUYER_PAY".equals(o.get("query_status"))
     ) throw error(409, "尚未确认待付款交易，不能关闭；请查询状态");
-    acquire(id);
+    String lease = pay.leases.acquire(id);
     try {
       var request = new AlipayTradeCloseRequest();
       request.setBizContent(
@@ -119,30 +124,37 @@ public class PaymentOperations {
             field.equals("app_id") ? str(o, "app_id") : str(o, "seller_id")
           ).equals(node.path(field).asText())
         ) throw error(503, "关单归属不匹配");
-      pay.applyStatus(
-        o,
-        response.getTradeNo(),
-        "TRADE_CLOSED",
-        ((Number) o.get("amount_cents")).intValue()
-      );
+      var closing = o;
+      pay.leases.guarded(user, id, lease, () -> {
+        pay.applyStatus(
+          closing,
+          response.getTradeNo(),
+          "TRADE_CLOSED",
+          ((Number) closing.get("amount_cents")).intValue()
+        );
+        return null;
+      });
       return pay.order(user, id);
     } catch (Exception e) {
-      pay.recordQuery(id, "QUERY_FAILED", "关单结果未确认，请查询订单状态");
+      pay.leases.guarded(user, id, lease, () -> {
+        pay.recordQuery(id, "QUERY_FAILED", "关单结果未确认，请查询订单状态");
+        return null;
+      });
       throw error(
         503,
         "关单结果未确认，请查询订单状态；不会根据失败请求关闭订单"
       );
     } finally {
-      release(id);
+      pay.leases.release(id, lease);
     }
   }
 
   Map<String, Object> refund(String user, String id) {
     var initial = eligible(user, id);
     if ("CASH_REFUNDED".equals(initial.get("status"))) return initial;
-    acquire(id);
+    String lease = pay.leases.acquire(id);
     try {
-      var r = s.locked(user, () -> {
+      var r = pay.leases.guarded(user, id, lease, () -> {
         var o = pay.order(user, id);
         var rows = s.db.queryForList(
           "SELECT * FROM payment_refunds WHERE order_id=?",
@@ -180,12 +192,15 @@ public class PaymentOperations {
         ((Number) r.get("attempted_at")).longValue() > 0 &&
         now() - ((Number) r.get("attempted_at")).longValue() < 10000
       ) return pay.order(user, id); // Throttle retries; always reuse original identifier, amount and reason.
-      s.db.update(
-        "UPDATE payment_refunds SET attempted_at=?,updated_at=? WHERE order_id=?",
-        now(),
-        now(),
-        id
-      );
+      pay.leases.guarded(user, id, lease, () -> {
+        s.db.update(
+          "UPDATE payment_refunds SET attempted_at=?,updated_at=? WHERE order_id=?",
+          now(),
+          now(),
+          id
+        );
+        return null;
+      });
       var request = new AlipayTradeRefundRequest();
       request.setBizContent(
         s.encode(
@@ -218,13 +233,13 @@ public class PaymentOperations {
       // code=10000 or fund_change=N is not final proof. Confirm through refund query.
       return pay.order(user, id);
     } catch (org.springframework.web.server.ResponseStatusException e) {
-      if (e.getStatusCode().value() != 409) unknown(id);
+      if (e.getStatusCode().value() != 409) markUnknown(user, id, lease);
       throw e;
     } catch (Exception e) {
-      unknown(id);
+      markUnknown(user, id, lease);
       throw error(503, "退款结果未确认，保留原请求号，请查询退款状态");
     } finally {
-      release(id);
+      pay.leases.release(id, lease);
     }
   }
 
@@ -247,7 +262,7 @@ public class PaymentOperations {
     if (
       now() - ((Number) r.get("attempted_at")).longValue() < 10000
     ) throw error(409, "退款查询请至少等待 10 秒，不要重复申请");
-    acquire(id);
+    String lease = pay.leases.acquire(id);
     try {
       var request = new AlipayTradeFastpayRefundQueryRequest();
       request.setBizContent(
@@ -278,28 +293,33 @@ public class PaymentOperations {
           ((Number) r.get("amount_cents")).intValue()
       ) throw error(503, "退款查询金额或请求号不匹配");
       String state = node.path("refund_status").asText();
-      if ("REFUND_SUCCESS".equals(state)) s.locked(user, () -> {
-        s.db.update(
-          "UPDATE payment_refunds SET status='SUCCEEDED',updated_at=? WHERE order_id=?",
-          now(),
-          id
-        );
-        s.db.update(
-          "UPDATE purchase_orders SET status='CASH_REFUNDED',query_error='' WHERE id=?",
-          id
-        );
-        return null;
-      });
+      if ("REFUND_SUCCESS".equals(state)) pay.leases.guarded(
+        user,
+        id,
+        lease,
+        () -> {
+          s.db.update(
+            "UPDATE payment_refunds SET status='SUCCEEDED',updated_at=? WHERE order_id=?",
+            now(),
+            id
+          );
+          s.db.update(
+            "UPDATE purchase_orders SET status='CASH_REFUNDED',query_error='' WHERE id=?",
+            id
+          );
+          return null;
+        }
+      );
       else if (!"REFUND_PROCESSING".equals(state)) throw error(
         503,
         "退款状态未知，不能认定退款完成"
       );
       return pay.order(user, id);
     } catch (Exception e) {
-      unknown(id);
+      markUnknown(user, id, lease);
       throw error(503, "退款查询未能确认，未更改为退款成功，请稍后重试");
     } finally {
-      release(id);
+      pay.leases.release(id, lease);
     }
   }
 }
