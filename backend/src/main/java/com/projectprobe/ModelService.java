@@ -633,8 +633,9 @@ public class ModelService {
         )
       );
     } else out = call(
-      "生成证据驱动复盘，返回 {clearParts:string[],findings:[{topic:string,assessment:string,task:string,turnIds:string[],factIds:string[]}],retestTopics:string[]}。三个数组必须显式返回，可为空。turnIds 必须逐字符复制 allowedTurnIds 中的 ID，至少一个，不能使用序号、主题、训练 ID 或自行构造 ID；factIds 只能逐字符复制 allowedFactIds 中的 ID，没有相关事实时返回 []。answeredTurns 是已回答证据，materialFacts 是材料事实。聚焦最多 3 个优先补充的薄弱点，合并相关发现；第一项优先选择用户明确暴露的主要职责、验证缺口或业务风险，不按你提问的先后排序，也不优先罗列尚未确认框架的语法知识。只描述这段回答未说明什么，不从缺少解释推断能力、规范意识、诚实程度或项目真实性。clearParts 不得把计划/假设/提问前提写成已执行的成果。每条引用原文须真正支持该判断，无相关材料则 factIds=[]。topic 不超过 30 字，assessment 不超过 80 字，task 不超过 60 字；每个条目的 turnIds/factIds 最多 2 个。clearParts 最多 3 条，每条不超过 50 字；retestTopics 最多 3 个短主题。不要生成引文或重复材料，服务端将附上原文。无回答时 findings 必须为空。",
-      reportInput(project, turns, facts)
+      "生成证据驱动复盘，返回 {clearParts:string[],findings:[{topic:string,assessment:string,task:string,turnIds:string[],factIds:string[]}],retestTopics:string[]}。三个数组必须显式返回，可为空。turnIds 必须逐字符复制 allowedTurnIds 中的 ID，至少一个，不能使用序号、主题、训练 ID 或自行构造 ID；factIds 只能逐字符复制 allowedFactIds 中的 ID，没有相关事实时返回 []。answeredTurns 是已回答证据，materialFacts 是材料事实。聚焦最多 3 个优先补充的薄弱点，合并相关发现；第一项优先选择用户明确暴露的主要职责、验证缺口或业务风险，不按你提问的先后排序，也不优先罗列尚未确认框架的语法知识。只描述这段回答未说明什么，不从缺少解释推断能力、规范意识、诚实程度或项目真实性。clearParts 不得把计划/假设/提问前提写成已执行的成果。每条引用原文须真正支持该判断，无相关材料则 factIds=[]。topic 不超过 30 字，assessment 不超过 80 字，task 不超过 60 字；每个条目的 turnIds/factIds 最多 2 个。clearParts 最多 3 条，每条不超过 50 字；retestTopics 最多 3 个短主题。不要生成引文或重复材料，服务端将附上原文。无回答时 findings 必须为空。" +
+        ("RETEST".equals(body.get("kind")) ? "另返回comparisons数组，最多一项，围绕focus比较两轮解释。条目为{topic,status,assessment,previousTurnIds,currentTurnIds}，topic等于focus；status只取EXPLAINED/PARTIAL/UNRESOLVED/NOT_COMPARABLE。只比较已表达内容，不将表述进步当实现已验证；条件不同无法比较时用NOT_COMPARABLE。previousTurnIds从previousAnsweredTurns复制PT引用，currentTurnIds从answeredTurns复制T引用，各最多2个；非NOT_COMPARABLE必须同时有两轮证据。assessment最多150字。" : ""),
+      ReportComparison.input(body, reportInput(project, turns, facts))
     );
     validateStrings(out, "clearParts", 8, 3000);
     validateStrings(out, "retestTopics", 6, 200);
@@ -698,6 +699,8 @@ public class ModelService {
         findings,
         "retestTopics",
         out.get("retestTopics"),
+        "comparisons",
+        ReportComparison.build(out, body),
         "mode",
         mode,
         "createdAt",
