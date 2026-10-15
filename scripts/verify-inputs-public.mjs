@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const emptyProject = { name: "", background: "", targetRole: "", stack: "", responsibility: "", resume: "", architecture: "", implementation: "", problems: "", verification: "", materials: "", facts: [], factsConfirmed: false };
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const output = path.join(root, ".runtime/resume-dedup-acceptance");
+const output = path.join(root, ".runtime/resume-extraction-acceptance");
 await mkdir(output, { recursive: true });
 const base = "https://39.96.27.134";
 const browser = await chromium.launch({ channel: "msedge", headless: true, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] });
@@ -20,7 +20,8 @@ const wait = async (locator, text) => {
   await locator.waitFor({ state: "visible", timeout: 70000 });
   if (text) assert((await locator.textContent()).includes(text), "页面状态与预期不一致");
 };
-const source = "合成验收简历，不代表真实求职经历。\n求职意向：Java 后端实习\n项目经历\n校园预约系统\n技术栈：Java / Spring Boot / PostgreSQL\n项目背景：学生预约自习室座位。\n个人职责：我负责预约创建接口和并发测试。\n关键实现：使用唯一约束限制同一座位和时段的有效预约。\n验证方式：构造两个并发请求，预期只有一个成功；尚未记录实际结果。\n";
+const source = await readFile(path.join(root, "backend/target/test-fixtures/synthetic-resume.txt"), "utf8");
+const docx = await readFile(path.join(root, "backend/target/test-fixtures/synthetic-resume.docx"));
 try {
   const registration = await context.request.post(base + "/api/auth/register", { headers: { Origin: base }, data: { username: "public-inputs-" + crypto.randomUUID(), password: crypto.randomUUID() + crypto.randomUUID() } });
   assert(registration.ok(), "合成账号注册失败");
@@ -35,15 +36,16 @@ try {
   assert(!(await page.locator(".mode-strip").textContent()).includes("真实 AI"), "顶部仍显示真实AI");
   await page.getByRole("checkbox", { name: "同意将简历文字发送至模型服务，并在本账号缓存识别结果30天" }).check();
   const responsePromise = page.waitForResponse(response => response.url().endsWith("/api/resume/import") && response.request().method() === "POST", { timeout: 80000 });
-  await page.getByLabel("上传简历文件").setInputFiles({ name: "synthetic-resume.txt", mimeType: "text/plain", buffer: Buffer.from(source) });
+  await page.getByLabel("上传简历文件").setInputFiles({ name: "synthetic-resume.docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", buffer: docx });
   const response = await responsePromise;
   const parsed = await response.json();
   assert(response.ok(), "公网简历识别失败：" + (parsed.message || response.status()));
-  assert(parsed.projects?.length > 0, "未识别出合成项目");
+  assert(parsed.projects?.length === 2, "未识别出两个合成项目");
   assert(parsed.duplicate === false, "新账号首次导入不应命中缓存");
-  const selected = parsed.projects.find(project => project.name.includes("校园预约"));
-  assert(selected && selected.responsibility.includes("我负责预约"), "合成项目名称或职责识别不正确");
-  for (const value of Object.values(selected)) assert(typeof value === "string" && (!value || source.includes(value)), "识别结果未来自原文");
+  const selected = parsed.projects.find(project => project.name.includes("Synthetic Memory"));
+  assert(selected && selected.responsibility.includes("有限重试"), "合成项目名称或职责识别不正确");
+  assert(!selected.resume.includes("Synthetic Tool Router"), "不同项目原文发生混用");
+  for (const project of parsed.projects) for (const value of Object.values(project)) assert(typeof value === "string" && (!value || value.split("\n").every(line => source.includes(line))), "识别结果未来自原文");
   // Reload and rename to verify a persistent server cache, not browser state.
   await wait(page.locator(".resume-candidate").first());
   await page.reload();
@@ -54,7 +56,7 @@ try {
   const duplicate = await duplicateResponse.json();
   assert(duplicateResponse.ok() && duplicate.duplicate === true, "改名重复上传未复用缓存");
   assert(JSON.stringify(duplicate.projects) === JSON.stringify(parsed.projects) && duplicate.recognizedAt === parsed.recognizedAt, "缓存结果或首次识别时间不一致");
-  await wait(page.getByRole("status"), "这份简历已上传过");
+  await wait(page.getByText(/这份简历已上传过/));
   await wait(page.locator(".resume-candidate").first());
   await page.locator(".resume-candidate").filter({ hasText: selected.name }).getByRole("button", { name: "使用这个项目" }).click();
   assert(await page.getByLabel("项目名称", { exact: true }).inputValue() === selected.name, "项目未自动填入");
@@ -71,15 +73,12 @@ try {
   await page.route("**/api/trainings/" + trainingId + "/transcribe", route => route.fulfill({ json: { text: "我负责预约接口，验证结果尚待补充。" } }));
   await page.goto(base + "/#/trainings/" + trainingId);
   await wait(page.getByLabel("你的回答", { exact: true }));
-  await page.getByRole("checkbox", { name: "同意将本段录音发送至百炼进行语音识别" }).check();
   await page.getByRole("button", { name: "开始录音", exact: true }).click();
   await wait(page.getByRole("button", { name: "结束录音", exact: true }));
   await page.waitForTimeout(1000);
   await page.getByRole("button", { name: "结束录音", exact: true }).click();
-  await wait(page.locator("audio"));
-  await page.locator("audio").evaluate(audio => audio.play());
-  await page.getByRole("button", { name: "转为文字", exact: true }).click();
-  await wait(page.getByLabel("语音转写结果"));
+  await wait(page.getByText("语音已填入回答", { exact: true }));
+  assert(await page.getByLabel("你的回答", { exact: true }).inputValue() === "我负责预约接口，验证结果尚待补充。", "转写未自动加入回答");
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), "语音页面横向溢出");
@@ -87,7 +86,7 @@ try {
   }
   assert(paymentWrites === 0 && errors.length === 0, "公网页面有脚本错误或交易写入");
   await context.request.post(base + "/api/auth/logout", { headers: { Origin: base } });
-  const result = { status: "PASSED", liveResumeImportVerified: true, persistentResumeDedupVerified: true, renamedFileAndNormalizedLineEndingsVerified: true, liveSpeechProviderVerifiedPreviously: true, speechUiUsesSyntheticFixtures: true, tlsVerified: true, microphoneAndPlaybackVerified: true, paymentWrites, scriptErrors: errors.length, userMaterialReads: 0, projectSaves: 0, widths: [1440, 390] };
+  const result = { status: "PASSED", liveDocxTwoProjectExtractionVerified: true, originalLineEvidenceVerified: true, persistentResumeDedupVerified: true, docxToTxtDedupVerified: true, liveSpeechProviderVerifiedPreviously: true, speechUiUsesSyntheticFixtures: true, tlsVerified: true, microphoneAndAutomaticAppendVerified: true, paymentWrites, scriptErrors: errors.length, userMaterialReads: 0, projectSaves: 0, widths: [1440, 390] };
   await writeFile(path.join(output, "public-result.json"), JSON.stringify(result, null, 2));
   console.log(JSON.stringify(result));
 } finally { await context.close(); await browser.close(); }
