@@ -55,6 +55,8 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
   const [startKey] = useState(crypto.randomUUID());
   const [startError, setStartError] = useState("");
   const [starting, setStarting] = useState(false);
+  const [exerciseMode, setExerciseMode] = useState("STANDARD");
+  const [difficulty, setDifficulty] = useState("IMPLEMENTATION");
   const [step, setStep] = useState<"materials" | "facts">("materials");
   const [shop, setShop] = useState<Shop | null>(null);
   const [draftNotice, setDraftNotice] = useState("");
@@ -179,7 +181,8 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
         const t = await api<Training>("/trainings", "POST", {
           projectId: id,
           parentId,
-          requestKey: parentId ? startKey + "-retest-" + parentId : startKey,
+          exerciseMode, difficulty,
+          requestKey: (parentId ? startKey + "-retest-" + parentId : startKey) + exerciseMode + difficulty,
         });
         if (mounted.current)
           go((t.status === "COMPLETED" ? "/report/" : "/trainings/") + t.id);
@@ -493,6 +496,13 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
               </li>
             </ul>
             <div className="start-block">
+              <label>练习长度<select value={exerciseMode} onChange={e => setExerciseMode(e.target.value)} disabled={busy}>
+                <option value="QUICK">快速练习 · 2题</option><option value="STANDARD">标准深挖 · 5题（复测3题）</option>
+              </select></label>
+              <label>追问侧重<select value={difficulty} onChange={e => setDifficulty(e.target.value)} disabled={busy}>
+                <option value="BASIC">实习基础与职责</option><option value="IMPLEMENTATION">实现细节</option>
+                <option value="TRADEOFF">故障与方案取舍</option>
+              </select></label>
               <Button
                 disabled={busy || dirty || !p.factsConfirmed || id === "new"}
                 onClick={() => start()}
@@ -510,8 +520,8 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
               {startError && <p className="action-error">{startError}</p>}
               <small>
                 {balance.unlimited
-                  ? "永久权益 · 默认 5 个回答"
-                  : "消耗 1 次训练权益 · 默认 5 个回答"}
+                  ? `永久权益 · ${exerciseMode === "QUICK" ? 2 : 5} 个回答`
+                  : `消耗 1 次训练权益 · ${exerciseMode === "QUICK" ? 2 : 5} 个回答`}
               </small>
               {quota === 0 && !balance.unlimited && (
                 <p className="quota-warning">
