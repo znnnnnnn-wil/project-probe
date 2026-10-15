@@ -86,6 +86,7 @@ public class TrainingService {
       payments.mode,
       payments.scope()
     );
+    children.sort(Comparator.comparing(c -> "COMPLETED".equals(c.get("status"))));
     for (var child : children) {
       String status = str(child, "status");
       if (!"REFUNDED".equals(status)) return Map.of(
@@ -251,7 +252,8 @@ public class TrainingService {
         );
         var entry = retestEntry(user, p);
         if (
-          Set.of("CONTINUE", "COMPLETED").contains(entry.get("state"))
+          "CONTINUE".equals(entry.get("state")) ||
+          ("COMPLETED".equals(entry.get("state")) && !Boolean.TRUE.equals(input.get("newRound")))
         ) return get(user, str(entry, "trainingId"));
         if (
           !PaymentService.available(pack, "RETEST") ||
@@ -285,7 +287,9 @@ public class TrainingService {
         body.put("previousReport", parentBody.get("report"));
         body.put("previousTurns", parentBody.get("turns"));
         body.put("previousProject", parentBody.get("project"));
-        var target = model.retestTarget(parentBody);
+        String selected = str(input, "focus");
+        if (selected.length() > 200) throw error(400, "复测主题过长");
+        var target = model.retestTarget(parentBody, selected);
         body.put("retestTarget", target);
         focus = str(target, "topic");
       }

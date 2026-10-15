@@ -315,6 +315,10 @@ public class ModelService {
   record GeneratedQuestion(String question, String topic) {}
 
   Map<String, Object> retestTarget(Map<String, Object> previous) {
+    return retestTarget(previous, "");
+  }
+
+  Map<String, Object> retestTarget(Map<String, Object> previous, String selected) {
     Object value = previous.get("report");
     if (value instanceof Map<?, ?> report) {
       if (report.get("findings") instanceof List<?> findings) {
@@ -322,7 +326,7 @@ public class ModelService {
           if (
             item instanceof Map<?, ?> finding &&
             finding.get("topic") instanceof String topic &&
-            !topic.isBlank() &&
+            !topic.isBlank() && (selected.isBlank() || selected.equals(topic.strip())) &&
             topic.length() <= 200
           ) {
             var target = new LinkedHashMap<String, Object>();
@@ -342,11 +346,12 @@ public class ModelService {
         for (Object item : topics)
           if (
             item instanceof String topic &&
-            !topic.isBlank() &&
+            !topic.isBlank() && (selected.isBlank() || selected.equals(topic.strip())) &&
             topic.length() <= 200
           ) return new LinkedHashMap<>(Map.of("topic", topic.strip()));
       }
     }
+    if (!selected.isBlank()) throw error(400, "请选择上轮报告中的复测主题");
     return new LinkedHashMap<>(
       Map.of(
         "topic",
