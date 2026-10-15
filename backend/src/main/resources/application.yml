@@ -10,6 +10,10 @@ logging:
     sdk.biz.err: OFF
     sdk.biz.info: OFF
 spring:
+  task:
+    scheduling:
+      pool:
+        size: 3
   servlet:
     multipart:
       max-file-size: 6MB
@@ -28,6 +32,7 @@ app:
   secure-cookie: ${SECURE_COOKIE:false}
   model-mode: ${MODEL_MODE:demo}
   model-timeout-seconds: ${MODEL_TIMEOUT_SECONDS:30}
+  model-concurrency: ${MODEL_MAX_CONCURRENT_CALLS:4}
   extraction-daily-limit: ${EXTRACTION_DAILY_LIMIT:20}
   model-free-quota-only: ${MODEL_FREE_QUOTA_ONLY:false}
   model-free-quota-confirmed-model: ${MODEL_FREE_QUOTA_CONFIRMED_MODEL:}
