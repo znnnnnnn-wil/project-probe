@@ -4,6 +4,7 @@ import { Button, PageHead } from "./ui";
 import type { Actions } from "./ui";
 import { DataControls } from "./privacy";
 import { UsageSummary } from "./usage-summary";
+import { FeedbackForm } from "./feedback";
 
 export function Account({ run, busy }: Actions) {
   const [password, setPassword] = useState("");
@@ -27,6 +28,7 @@ export function Account({ run, busy }: Actions) {
     </div>
     <DataControls run={run} busy={busy} />
     <UsageSummary />
+    <FeedbackForm run={run} busy={busy} />
   </section>;
 }
 

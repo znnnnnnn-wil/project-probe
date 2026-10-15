@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 class TrainingSupport {
   final Store s;
   final TrainingService trainings;
+  @org.springframework.beans.factory.annotation.Autowired FeedbackService feedback;
   TrainingSupport(Store s, TrainingService trainings) { this.s = s; this.trainings = trainings; }
 
   Map<String, Object> submit(String user, String id, Map<String, Object> input) {
@@ -30,6 +31,7 @@ class TrainingSupport {
       var event = Map.<String, Object>of("requestKey", request, "kind", kind, "detail", detail,
         "turnId", turnId, "createdAt", now(), "question", turns.get(turns.size() - 1).get("question"));
       events.add(event);
+      if (kind.equals("FEEDBACK")) feedback.submit(user, Map.of("kind", "QUESTION", "detail", detail, "requestKey", request), id);
       if (!kind.equals("FEEDBACK")) {
         body.put("questionRequest", event); body.put("operation", "REVISE_QUESTION");
       }

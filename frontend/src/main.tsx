@@ -100,7 +100,7 @@ function App() {
         (e instanceof DOMException && e.name === "AbortError")
       )
         return;
-      setError(e instanceof Error ? e.message : "操作失败，请重试");
+      setError(e instanceof ApiError && e.requestId ? `${e.message}（请求编号：${e.requestId}）` : e instanceof Error ? e.message : "操作失败，请重试");
       if (e instanceof ApiError && e.status === 401) {
         setUser(null);
         go("/login");
