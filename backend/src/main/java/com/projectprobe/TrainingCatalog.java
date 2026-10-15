@@ -191,7 +191,7 @@ final class TrainingCatalog {
       Map<String, Object> item = body;
       if (summary) {
         item = new LinkedHashMap<>();
-        for (String key : List.of("kind", "maxTurns", "historyRoundNumber"))
+        for (String key : List.of("kind", "maxTurns", "historyRoundNumber", "focus", "parentId"))
           if (body.containsKey(key)) item.put(key, body.get(key));
         var project = (Map<String, Object>) body.get("project");
         item.put(

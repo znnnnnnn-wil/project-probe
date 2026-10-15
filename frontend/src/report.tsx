@@ -14,6 +14,7 @@ import type { Training, Report } from "./types";
 import { downloadReport } from "./report-export";
 import { Button, Loading, Empty, PageHead, sourceLabel } from "./ui";
 import type { Actions } from "./ui";
+import { RetestWorkspace } from "./retest-workspace";
 
 function ReportTask({
   training,
@@ -293,6 +294,7 @@ export function ReportPage({ id, run, busy }: Actions & { id: string }) {
             busy={busy}
             onSaved={setT}
           />
+          {t.kind === "DEEP" && <RetestWorkspace training={t} run={run} busy={busy} />}
           {t.kind === "RETEST" && (
             <section className="panel comparison">
               <h2>前后回答对照</h2>
