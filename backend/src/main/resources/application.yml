@@ -31,6 +31,9 @@ app:
   trusted-proxy-addresses: ${TRUSTED_PROXY_ADDRESSES:}
   secure-cookie: ${SECURE_COOKIE:false}
   model-mode: ${MODEL_MODE:demo}
+  operator-user-ids: ${OPERATOR_USER_IDS:}
+  model-input-price-per-million: ${MODEL_INPUT_PRICE_PER_MILLION:-1}
+  model-output-price-per-million: ${MODEL_OUTPUT_PRICE_PER_MILLION:-1}
   model-timeout-seconds: ${MODEL_TIMEOUT_SECONDS:30}
   model-concurrency: ${MODEL_MAX_CONCURRENT_CALLS:4}
   extraction-daily-limit: ${EXTRACTION_DAILY_LIMIT:20}

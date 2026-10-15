@@ -212,6 +212,8 @@ export function ReportPage({ id, run, busy }: Actions & { id: string }) {
         controller.signal,
       );
       if (!controller.signal.aborted) setT(value);
+      if (!controller.signal.aborted && value.status === "COMPLETED")
+        api("/trainings/" + id + "/view", "POST").catch(() => {});
     });
     return () => controller.abort();
   }, [id, run]);

@@ -17,6 +17,7 @@ class UserData {
   }
   void eraseProject(String user, String projectId) {
     projects.get(user, projectId);
+    s.db.update("DELETE FROM report_views WHERE user_id=? AND training_id IN (SELECT id FROM trainings WHERE project_id=?)", user, projectId);
     s.db.update("UPDATE project_trials SET body='{}',status='CLEARED',lease_token=NULL,lease_until=0 WHERE user_id=? AND project_id=?", user, projectId);
     s.db.update("DELETE FROM answer_drafts WHERE training_id IN (SELECT id FROM trainings WHERE user_id=? AND project_id=?)", user, projectId);
     s.db.update("DELETE FROM training_question_index WHERE user_id=? AND project_id=?", user, projectId);
