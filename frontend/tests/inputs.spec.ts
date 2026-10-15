@@ -12,7 +12,7 @@ test.use({
   },
 });
 async function seed(page: Page) {
-  const headers = { Origin: "http://localhost:5174" };
+  const headers = { Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174").origin };
   const post = async (path: string, data: unknown = {}) => {
     const response = await page.request.post("/api" + path, { headers, data });
     expect(response.ok()).toBeTruthy();

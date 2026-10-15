@@ -6,7 +6,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
-@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:usage;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
+@SpringBootTest(properties = {"spring.datasource.url=${PROBE_TEST_DB_URL:jdbc:h2:mem:usage;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}",
+  "spring.datasource.username=${PROBE_TEST_DB_USER:sa}", "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
   "app.model-mode=demo", "app.payment.mode=mock", "app.payment.reconcile-enabled=false"})
 class UsageMetricsTest {
   @Autowired Store s; @Autowired ProjectService projects; @Autowired TrainingService trainings;
@@ -23,7 +24,7 @@ class UsageMetricsTest {
     assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> metrics.operator(f.user()));
     metrics.operators = f.user();
     assertTrue(metrics.operator(f.user()).get("payments").toString().contains("mock"));
-    assertFalse(metrics.operator(f.user()).get("payments").toString().contains("production"));
+    assertEquals("mock", s.one("SELECT mode FROM purchase_orders WHERE user_id=?", f.user()).get("mode"));
     assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> metrics.view(id(), str(f.training(), "id"), trainings));
     trainings.finish(f.user(), str(f.training(), "id"));
     metrics.view(f.user(), str(f.training(), "id"), trainings); metrics.view(f.user(), str(f.training(), "id"), trainings);

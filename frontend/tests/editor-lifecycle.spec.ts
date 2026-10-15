@@ -24,6 +24,7 @@ test("离开项目页后开始训练的迟到响应不会抢回页面", async ({
         factsConfirmed: true,
         version: 1,
       };
+    else if (path === "/api/projects/" + projectId + "/practice") json = { status: "AVAILABLE" };
     else if (path === "/api/shop")
       json = {
         mode: "mock",

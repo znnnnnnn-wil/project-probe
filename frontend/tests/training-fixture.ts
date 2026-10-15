@@ -1,11 +1,11 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { demoProject } from "../src/api";
 import type { Training } from "../src/types";
 
 export async function trainingFixture(page: Page) {
   const post = async (path: string, data: unknown = {}) => {
     const response = await page.request.post("/api" + path, {
-      headers: { Origin: "http://localhost:5174" }, data,
+      headers: { Origin: new URL(test.info().project.use.baseURL || "http://localhost:5174").origin }, data,
     });
     expect(response.ok(), await response.text()).toBeTruthy();
     return response.json();

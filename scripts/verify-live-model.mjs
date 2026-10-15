@@ -215,14 +215,19 @@ try {
     });
     deep = await api("/trainings/" + previous.deep.id);
     assert(["FAILED", "COMPLETED"].includes(deep.status));
-    assert.equal(deep.turns.filter((t) => t.answer).length, 2);
+    assert(deep.turns.filter((t) => t.answer).length <= 2);
     project = await api("/projects/" + deep.project.id);
     if (deep.status === "FAILED") {
       deep = await api("/trainings/" + deep.id + "/retry", "POST", {});
-      pass("真实失败训练保留两段回答，重试恢复原训练且未创建新权益");
+      pass("真实失败训练保留已有内容，重试恢复原训练且未创建新权益");
       if (deep.status === "ACTIVE") {
+        const answers = qualityCase?.answers || ["合成回答：我负责接口，未验证的职责边界仍需确认。", "合成回答：验证仍是计划，尚未取得实际结果。"];
+        for (const answer of answers.slice(deep.turns.filter(t => t.answer).length)) {
+          assert(deep.status === "ACTIVE" && deep.turns.at(-1)?.id, "恢复后没有可回答的问题");
+          deep = await api("/trainings/" + deep.id + "/answer", "POST", { turnId: deep.turns.at(-1).id, answer });
+        }
         deep = await api("/trainings/" + deep.id + "/finish", "POST", {});
-        pass("追问故障恢复后，使用已保留回答生成报告");
+        pass("故障恢复后继续未完成回答并生成报告，保留原训练与已提交内容");
       }
     } else {
       pass("已恢复的真实报告持久保存，继续后续验证且不重复调用复盘模型");
@@ -258,6 +263,7 @@ try {
       projectId: project.id,
       requestKey: randomUUID(),
     });
+    assert.equal(deep.status, "ACTIVE", "首题生成未通过，保留失败训练供恢复，不能继续提交空题");
     for (const answer of qualityCase?.answers || [
       "这是合成预约项目。我负责预约创建接口、预约表唯一约束和部分集成测试。前端由同学实现。请求进入 Controller，Service 在事务内检查参数并插入预约，数据库限制同座位同时间段的有效预约唯一。我还没有实现跨时间段重叠处理，也没有完整验证取消与创建同时发生的行为。",
       "我会让数据库约束兜底，而不是仅依赖查询后插入。唯一冲突时回滚并返回冲突提示。目前没有请求幂等键，没有处理数据库已提交但响应丢失后的客户端重试。我只验证了两个相同时间段的并发预约只有一次成功，对超时重试、取消并发和不同时间段重叠仍缺少测试。",

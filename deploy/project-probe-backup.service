@@ -1,0 +1,10 @@
+[Unit]
+Description=Protected Project Probe database backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/project-probe-staging/backup-database.py --keep-days 14
+UMask=0077
+PrivateTmp=true
+NoNewPrivileges=true
