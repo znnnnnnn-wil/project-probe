@@ -29,6 +29,9 @@ public class WebConfig extends OncePerRequestFilter {
     HttpServletResponse res,
     FilterChain chain
   ) throws ServletException, IOException {
+    String requestId = UUID.randomUUID().toString();
+    req.setAttribute("requestId", requestId);
+    res.setHeader("X-Request-ID", requestId);
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -36,10 +39,15 @@ public class WebConfig extends OncePerRequestFilter {
       "Cache-Control",
       "no-store"
     );
-    boolean upload = req.getMethod().equals("POST") && (
-      req.getRequestURI().equals("/api/resume/import") ||
-      req.getRequestURI().matches("/api/trainings/[a-f0-9-]{36}/transcribe")
-    ) && Objects.toString(req.getContentType(), "").startsWith("multipart/form-data");
+    boolean upload =
+      req.getMethod().equals("POST") &&
+      (req.getRequestURI().equals("/api/resume/import") ||
+        req
+          .getRequestURI()
+          .matches("/api/trainings/[a-f0-9-]{36}/transcribe")) &&
+      Objects.toString(req.getContentType(), "").startsWith(
+        "multipart/form-data"
+      );
     if (req.getContentLengthLong() > (upload ? 7 * 1024 * 1024 : 200000)) {
       res.sendError(413);
       return;
@@ -69,13 +77,20 @@ public class WebConfig extends OncePerRequestFilter {
         return;
       }
       long now = Store.now();
-      if (attempts.size() > 10000) attempts
-        .entrySet()
-        .removeIf(e -> now - e.getValue()[0] > 60000);
-      var counter = attempts.computeIfAbsent(client, k -> new long[] {
-        now,
-        0,
-      });
+      long[] counter;
+      synchronized (attempts) {
+        if (attempts.size() >= 10000) purgeAttempts();
+        counter = attempts.get(client);
+        if (counter == null) {
+          if (attempts.size() >= 10000) {
+            res.setHeader("Retry-After", "60");
+            res.sendError(429);
+            return;
+          }
+          counter = new long[] { now, 0 };
+          attempts.put(client, counter);
+        }
+      }
       synchronized (counter) {
         if (now - counter[0] > 60000) {
           counter[0] = now;
@@ -93,6 +108,16 @@ public class WebConfig extends OncePerRequestFilter {
         }
       }
     }
-    chain.doFilter(req, res);
+    chain.doFilter(upload ? req : new LimitedRequest(req, 200000), res);
+  }
+
+  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 60000)
+  void purgeAttempts() {
+    long time = Store.now();
+    attempts.entrySet().removeIf(entry -> {
+      synchronized (entry.getValue()) {
+        return time - entry.getValue()[0] > 60000;
+      }
+    });
   }
 }

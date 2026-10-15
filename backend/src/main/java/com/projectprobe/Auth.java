@@ -118,4 +118,12 @@ public class Auth {
     );
     cookie(res, "", 0);
   }
+
+  @org.springframework.scheduling.annotation.Scheduled(
+    fixedDelay = 3600000,
+    initialDelay = 60000
+  )
+  void purgeExpiredSessions() {
+    s.db.update("DELETE FROM auth_sessions WHERE expires_at<=?", now());
+  }
 }
