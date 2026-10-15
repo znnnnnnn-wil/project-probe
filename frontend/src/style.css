@@ -830,14 +830,16 @@ textarea::placeholder {
 .history-list {
   padding: 0 25px;
 }
-.history-list > a {
+.history-list .history-link {
   display: flex;
   align-items: center;
   gap: 20px;
   padding: 24px 0;
+}
+.history-record {
   border-bottom: 1px solid var(--line);
 }
-.history-list > a:last-child {
+.history-record:last-child {
   border: 0;
 }
 .history-list h3 {
@@ -850,9 +852,67 @@ textarea::placeholder {
 .history-list .badge {
   margin-left: auto;
 }
-.history-list > a > svg {
+.history-list .history-link > svg {
   color: #9ead8e;
   width: 16px;
+}
+.history-filter {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 360px);
+  align-items: center;
+  gap: 12px;
+  padding: 20px 0 0;
+}
+.history-filter select {
+  min-width: 0;
+  max-width: 100%;
+  width: min(360px, 100%);
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: white;
+  font: inherit;
+}
+.history-link > div:nth-child(2) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.history-link .badge {
+  flex-shrink: 0;
+}
+.archive-details {
+  padding-bottom: 24px;
+}
+.archive-turns {
+  padding-left: 20px;
+}
+.archive-turns li {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+.archive-turns li:last-child {
+  border: 0;
+}
+.archive-turn-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+}
+.archive-turn-heading time {
+  color: var(--muted);
+  font-size: 11px;
+}
+.history-list .archive-question,
+.history-list .archive-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  line-height: 1.7;
+  margin-top: 12px;
+}
+.archive-question {
+  font-weight: 600;
 }
 .interview-layout {
   display: grid;
@@ -1780,7 +1840,7 @@ blockquote p {
   .history-list {
     padding: 0 17px;
   }
-  .history-list > a {
+  .history-list .history-link {
     gap: 12px;
     flex-wrap: wrap;
   }
@@ -1792,7 +1852,7 @@ blockquote p {
   .history-list .card-icon svg {
     width: 18px;
   }
-  .history-list > a > div:nth-child(2) {
+  .history-list .history-link > div:nth-child(2) {
     flex: 1;
   }
   .history-list h3 {
@@ -1804,7 +1864,7 @@ blockquote p {
   .history-list .badge {
     font-size: 9px;
   }
-  .history-list > a > svg {
+  .history-list .history-link > svg {
     display: none;
   }
   .subtle-note {
