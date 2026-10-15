@@ -65,7 +65,7 @@ public class WebConfig extends OncePerRequestFilter {
     }
     if (
       mutation &&
-      Set.of("/api/auth/login", "/api/auth/register").contains(
+      Set.of("/api/auth/login", "/api/auth/register", "/api/auth/recover", "/api/account/recovery", "/api/account/password").contains(
         req.getRequestURI()
       )
     ) {

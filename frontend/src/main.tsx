@@ -23,6 +23,7 @@ import "./style.css";
 const Home = lazy(() =>
   import("./home").then((module) => ({ default: module.Home })),
 );
+const Account = lazy(() => import("./account").then(module => ({ default: module.Account })));
 const Login = lazy(() =>
   import("./home").then((module) => ({ default: module.Login })),
 );
@@ -155,7 +156,7 @@ function App() {
         <div className="account">
           {user ? (
             <>
-              <span>{user.username}</span>
+              <a href="#/account">{user.username} · 账户</a>
               <button
                 aria-label="退出登录"
                 onClick={() =>
@@ -232,7 +233,7 @@ function App() {
                   );
                 }}
               />
-            ) : path === "/" || nav === "projects" ? (
+            ) : nav === "account" ? <Account {...props} /> : path === "/" || nav === "projects" ? (
               path === "/" || path === "/projects" ? (
                 <Workspace {...props} />
               ) : (

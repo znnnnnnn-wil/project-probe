@@ -11,6 +11,7 @@ import {
 import { api } from "./api";
 import { Button, PageHead } from "./ui";
 import type { Actions } from "./ui";
+import { RecoverLogin } from "./account";
 
 export function Home({ onStart }: { onStart: () => void }) {
   const [sampleAnswer, setSampleAnswer] = useState("");
@@ -148,8 +149,10 @@ export function Login({
   onLogin,
 }: Actions & { onLogin: (u: { id: string; username: string }) => void }) {
   const [register, setRegister] = useState(true);
+  const [recover, setRecover] = useState(false);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  if (recover) return <section className="page"><RecoverLogin run={run} busy={busy} onBack={() => { setRecover(false); setRegister(false); }} /></section>;
   return (
     <section className="auth-layout">
       <div>
@@ -180,6 +183,7 @@ export function Login({
         }}
       >
         <h2>{register ? "创建练习账号" : "欢迎回来"}</h2>
+        {!register && <button type="button" className="text-link" onClick={() => setRecover(true)}>忘记密码？使用恢复码</button>}
         <p>使用独立账号保存你的练习进度。</p>
         <label>
           用户名
