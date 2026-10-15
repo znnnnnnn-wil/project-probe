@@ -24,6 +24,7 @@ const Home = lazy(() =>
   import("./home").then((module) => ({ default: module.Home })),
 );
 const Account = lazy(() => import("./account").then(module => ({ default: module.Account })));
+const PrivacyInfo = lazy(() => import("./privacy").then(module => ({ default: module.PrivacyInfo })));
 const Login = lazy(() =>
   import("./home").then((module) => ({ default: module.Login })),
 );
@@ -207,7 +208,7 @@ function App() {
           <Suspense fallback={<Loading />}>
             {!ready ? (
               <Loading />
-            ) : path === "/" && !user ? (
+            ) : nav === "privacy" ? <PrivacyInfo /> : path === "/" && !user ? (
               <Home
                 onStart={() => {
                   sessionStorage.setItem("auth:return", "/projects/new");
@@ -265,6 +266,7 @@ function App() {
       </main>
       <footer>
         <span>项目追问官</span>
+        <a href="#/privacy">隐私与服务说明</a>
         <span>每一次追问，都离讲明白更近一步。</span>
         <small>练习反馈仅供参考，不承诺面试或录用结果。</small>
       </footer>

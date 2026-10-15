@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { api } from "./api";
 import { Button, PageHead } from "./ui";
 import type { Actions } from "./ui";
+import { DataControls } from "./privacy";
 
 export function Account({ run, busy }: Actions) {
   const [password, setPassword] = useState("");
@@ -23,6 +24,7 @@ export function Account({ run, busy }: Actions) {
         await api("/account/password", "POST", { password, newPassword: next }); sessionStorage.clear(); location.hash = "/login"; location.reload();
       })}>修改密码并退出所有设备</Button>
     </div>
+    <DataControls run={run} busy={busy} />
   </section>;
 }
 
