@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ArrowUpRight,
@@ -33,6 +33,32 @@ import { downloadReport } from "./report-export";
 import { trainingQuota } from "./quota";
 import { ResumeImport } from "./resume-import";
 import { VoiceInput } from "./voice-input";
+
+import { Loading as SharedLoading, Empty as SharedEmpty, PageBoundary as SharedPageBoundary } from "./ui";
+const NewHome = lazy(() =>
+  import("./home").then((module) => ({ default: module.Home })),
+);
+const NewLogin = lazy(() =>
+  import("./home").then((module) => ({ default: module.Login })),
+);
+const NewEditor = lazy(() =>
+  import("./editor").then((module) => ({ default: module.Editor })),
+);
+const NewHistory = lazy(() =>
+  import("./history").then((module) => ({ default: module.History })),
+);
+const NewInterview = lazy(() =>
+  import("./interview").then((module) => ({ default: module.Interview })),
+);
+const NewReportPage = lazy(() =>
+  import("./report").then((module) => ({ default: module.ReportPage })),
+);
+const NewShopPage = lazy(() =>
+  import("./shop").then((module) => ({ default: module.ShopPage })),
+);
+const NewPaymentReturn = lazy(() =>
+  import("./shop").then((module) => ({ default: module.PaymentReturn })),
+);
 
 const sourceLabel: Record<string, string> = {
   USER_PROVIDED: "材料提供",
@@ -88,10 +114,13 @@ function App() {
     paymentConfigured: boolean;
   } | null>(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const busy = pendingRequests > 0;
   const [menu, setMenu] = useState(false);
+  const navigationVersion = useRef(0);
   useEffect(() => {
     const change = () => {
+      ++navigationVersion.current;
       setPath(
         location.hash.slice(1) ||
           (location.pathname === "/payment-return" ? "/payment-return" : "/"),
@@ -111,18 +140,24 @@ function App() {
     return () => window.removeEventListener("hashchange", change);
   }, []);
   const run = useCallback(async (fn: () => Promise<void>) => {
-    setBusy(true);
+    const version = navigationVersion.current;
+    setPendingRequests((count) => count + 1);
     setError("");
     try {
       await fn();
     } catch (e) {
+      if (
+        version !== navigationVersion.current ||
+        (e instanceof DOMException && e.name === "AbortError")
+      )
+        return;
       setError(e instanceof Error ? e.message : "操作失败，请重试");
       if (e instanceof ApiError && e.status === 401) {
         setUser(null);
         go("/login");
       }
     } finally {
-      setBusy(false);
+      setPendingRequests((count) => count - 1);
     }
   }, []);
   const props = { run, busy };
@@ -220,60 +255,65 @@ function App() {
         </div>
       )}
       <main>
-        {!ready ? (
-          <Loading />
-        ) : path === "/" && !user ? (
-          <Home
-            onStart={() => {
-              sessionStorage.setItem("auth:return", "/projects/new");
-              go("/login");
-            }}
-          />
-        ) : !user || path === "/login" ? (
-          <Login
-            {...props}
-            onLogin={(u) => {
-              setUser(u);
-              const next = sessionStorage.getItem("auth:return") || "/projects";
-              sessionStorage.removeItem("auth:return");
-              go(
-                location.pathname === "/payment-return"
-                  ? "/payment-return"
-                  : /^\/(projects|trainings|report|shop|history)(\/|$)/.test(
-                        next,
-                      )
-                    ? next
-                    : "/projects",
-              );
-            }}
-          />
-        ) : path === "/" || nav === "projects" ? (
-          path === "/" || path === "/projects" ? (
-            <Workspace {...props} />
-          ) : (
-            <Editor key={path} id={path.split("/")[2]} {...props} />
-          )
-        ) : nav === "trainings" ? (
-          <Interview key={path} id={path.split("/")[2]} {...props} />
-        ) : nav === "report" ? (
-          <ReportPage key={path} id={path.split("/")[2]} {...props} />
-        ) : nav === "shop" ? (
-          <ShopPage {...props} />
-        ) : nav === "payment-return" ? (
-          <PaymentReturn
-            {...props}
-            configured={config?.paymentConfigured || false}
-            mode={config?.paymentMode || ""}
-          />
-        ) : nav === "history" ? (
-          <History {...props} />
-        ) : (
-          <Empty
-            title="页面不存在"
-            text="返回项目列表继续练习。"
-            action={() => go("/projects")}
-          />
-        )}
+        <SharedPageBoundary key={path}>
+          <Suspense fallback={<SharedLoading />}>
+            {!ready ? (
+              <SharedLoading />
+            ) : path === "/" && !user ? (
+              <NewHome
+                onStart={() => {
+                  sessionStorage.setItem("auth:return", "/projects/new");
+                  go("/login");
+                }}
+              />
+            ) : !user || path === "/login" ? (
+              <NewLogin
+                {...props}
+                onLogin={(u) => {
+                  setUser(u);
+                  const next =
+                    sessionStorage.getItem("auth:return") || "/projects";
+                  sessionStorage.removeItem("auth:return");
+                  go(
+                    location.pathname === "/payment-return"
+                      ? "/payment-return"
+                      : /^\/(projects|trainings|report|shop|history)(\/|$)/.test(
+                            next,
+                          )
+                        ? next
+                        : "/projects",
+                  );
+                }}
+              />
+            ) : path === "/" || nav === "projects" ? (
+              path === "/" || path === "/projects" ? (
+                <Workspace {...props} />
+              ) : (
+                <NewEditor key={path} id={path.split("/")[2]} {...props} />
+              )
+            ) : nav === "trainings" ? (
+              <NewInterview key={path} id={path.split("/")[2]} {...props} />
+            ) : nav === "report" ? (
+              <NewReportPage key={path} id={path.split("/")[2]} {...props} />
+            ) : nav === "shop" ? (
+              <NewShopPage {...props} />
+            ) : nav === "payment-return" ? (
+              <NewPaymentReturn
+                {...props}
+                configured={config?.paymentConfigured || false}
+                mode={config?.paymentMode || ""}
+              />
+            ) : nav === "history" ? (
+              <NewHistory {...props} />
+            ) : (
+              <SharedEmpty
+                title="页面不存在"
+                text="返回项目列表继续练习。"
+                action={() => go("/projects")}
+              />
+            )}
+          </Suspense>
+        </SharedPageBoundary>
       </main>
       <footer>
         <span>项目追问官</span>
