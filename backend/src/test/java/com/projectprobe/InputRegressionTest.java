@@ -110,6 +110,33 @@ class InputRegressionTest {
   }
 
   @Test
+  void exhaustedParsingQuotaRejectsBeforeReadingDocument() throws Exception {
+    String user = user();
+    var upload = spy(
+      file(
+        "resume.txt",
+        "合成项目简历，我负责接口和测试，尚未执行压测。".getBytes(
+          StandardCharsets.UTF_8
+        )
+      )
+    );
+    s.db.update(
+      "INSERT INTO input_limits(user_id,kind,window_start,attempts) VALUES (?,'RESUME_PARSE',?,60)",
+      user,
+      now()
+    );
+    assertEquals(
+      429,
+      assertThrows(ResponseStatusException.class, () ->
+        inputs.resume(user, upload)
+      )
+        .getStatusCode()
+        .value()
+    );
+    verify(upload, never()).getBytes();
+  }
+
+  @Test
   void readsDocxParagraphAndTable() throws Exception {
     try (
       var document = new XWPFDocument();
@@ -220,6 +247,9 @@ class InputRegressionTest {
     p.put("name", "预约系统");
     p.put("responsibility", "我负责接口");
     p.put("resume", "预约系统，我负责接口");
+    p.put("startLine", 2);
+    p.put("endLine", 2);
+    p.put("fields", Map.of("responsibility", List.of(2)));
     return p;
   }
 
@@ -239,9 +269,9 @@ class InputRegressionTest {
   MockMultipartFile resumeFile(String name, String suffix) {
     return file(
       name,
-      ("仅用于功能验收的合成测试简历\n预约系统，我负责接口\n" + suffix).getBytes(
-        StandardCharsets.UTF_8
-      )
+      (
+        "仅用于功能验收的合成测试简历\n预约系统，我负责接口\n" + suffix
+      ).getBytes(StandardCharsets.UTF_8)
     );
   }
 
@@ -331,7 +361,7 @@ class InputRegressionTest {
     String user = user();
     var model = resumeModel("model-a");
     var invented = candidate();
-    invented.put("verification", "编造压测结果");
+    invented.put("startLine", 0);
     doReturn(
       Map.of("projects", List.of(invented)),
       Map.of("projects", List.of(candidate()))
@@ -531,7 +561,7 @@ class InputRegressionTest {
   void validatesGroundedResumeAndLeavesUnknownEmpty() {
     var result = InputService.validateResume(
       Map.of("projects", List.of(candidate())),
-      "预约系统，我负责接口"
+      "合成简历\n预约系统，我负责接口"
     );
     assertEquals(
       "",
@@ -540,21 +570,252 @@ class InputRegressionTest {
   }
 
   @Test
-  void rejectsInventedOrCrossProjectClaims() {
+  void clearsUnreliableOptionalFieldsWithoutLosingProject() {
     var p = candidate();
-    p.put("verification", "压测十万请求");
+    p.put("stack", "原文没有的框架");
+    p.put(
+      "fields",
+      Map.of("responsibility", List.of(2), "verification", List.of(3))
+    );
+    var result = InputService.validateResume(
+      Map.of("projects", List.of(p)),
+      "合成简历\n预约系统，我负责接口\n其他项目压测十万请求"
+    );
+    var project = modelObjects(result, "projects", 4).get(0);
+    assertEquals("", project.get("verification"));
+    assertEquals("", project.get("stack"));
+    assertEquals("预约系统，我负责接口", project.get("responsibility"));
+    assertFalse(((List<?>) result.get("warnings")).isEmpty());
+  }
+
+  @Test
+  void extractsOriginalLinesDespiteDocxWhitespaceAndModelReformatting()
+    throws Exception {
+    try (
+      var document = new XWPFDocument();
+      var output = new ByteArrayOutputStream()
+    ) {
+      document
+        .createParagraph()
+        .createRun()
+        .setText("合成测试简历，所有数据仅用于功能验证。");
+      var title = document.createParagraph().createRun();
+      title.setText("Synthetic Memory");
+      title.addTab();
+      title.setText("Platform | Spring Boot · RabbitMQ · Redis | GitHub SDK");
+      document
+        .createParagraph()
+        .createRun()
+        .setText(
+          "分布式任务处理：我负责实现异步任务、消费端幂等、手动 ACK 与有限重试。"
+        );
+      document
+        .createParagraph()
+        .createRun()
+        .setText("关联查询：使用固定数据集测试查询，验证结果待补充。");
+      document
+        .createParagraph()
+        .createRun()
+        .setText(
+          "Synthetic Tool Router | Java 21 · Lucene · Embedding | GitHub"
+        );
+      document
+        .createParagraph()
+        .createRun()
+        .setText(
+          "工具检索：我负责BM25与向量检索融合，以及工具更新后的向量复用。"
+        );
+      document
+        .createParagraph()
+        .createRun()
+        .setText("评测方式：自建合成查询集，尚未记录实际指标。");
+      document.write(output);
+      String text = inputs.parser.read(
+        file("synthetic.docx", output.toByteArray())
+      );
+      var fixtures = java.nio.file.Path.of("target", "test-fixtures");
+      java.nio.file.Files.createDirectories(fixtures);
+      java.nio.file.Files.write(
+        fixtures.resolve("synthetic-resume.docx"),
+        output.toByteArray()
+      );
+      java.nio.file.Files.writeString(
+        fixtures.resolve("synthetic-resume.txt"),
+        text,
+        StandardCharsets.UTF_8
+      );
+      var modelOutput = Map.<String, Object>of(
+        "projects",
+        List.of(
+          Map.of(
+            "name",
+            "Synthetic Memory Platform",
+            "startLine",
+            2,
+            "endLine",
+            4,
+            "stack",
+            "Spring Boot·RabbitMQ·Redis",
+            "fields",
+            Map.of(
+              "responsibility",
+              List.of(3),
+              "implementation",
+              List.of(3),
+              "verification",
+              List.of(4)
+            )
+          )
+        )
+      );
+      var project = modelObjects(
+        InputService.validateResume(modelOutput, text),
+        "projects",
+        4
+      ).get(0);
+      for (Object value : project.values())
+        assertTrue(
+          value.toString().isEmpty() || text.contains(value.toString())
+        );
+      assertTrue(project.get("name").toString().contains("\t"));
+      assertTrue(project.get("responsibility").toString().contains("有限重试"));
+      assertEquals("Spring Boot · RabbitMQ · Redis", project.get("stack"));
+    }
+  }
+
+  @Test
+  void validatesLineReferencesAndSortsDeduplicatedFields() {
+    var p = candidate();
+    p.put("endLine", 4);
+    p.put(
+      "fields",
+      Map.of("responsibility", List.of(4, 3, 3), "verification", List.of(2.5))
+    );
+    var result = InputService.validateResume(
+      Map.of("projects", List.of(p)),
+      "合成简历\n预约系统\n实现接口\n执行测试"
+    );
+    var project = modelObjects(result, "projects", 4).get(0);
+    assertEquals("实现接口\n执行测试", project.get("responsibility"));
+    assertEquals("", project.get("verification"));
+    assertFalse(((List<?>) result.get("warnings")).isEmpty());
+  }
+
+  @Test
+  void rejectsOverlappingProjectsAndInvalidTitlesWithoutSaving() {
+    var first = candidate();
+    var second = candidate();
+    second.put("endLine", 3);
     assertThrows(ResponseStatusException.class, () ->
       InputService.validateResume(
-        Map.of("projects", List.of(p)),
-        "预约系统，我负责接口"
+        Map.of("projects", List.of(first, second)),
+        "合成简历\n预约系统\n另一个项目"
       )
     );
+    first.put("name", "凭空编造的项目");
     assertThrows(ResponseStatusException.class, () ->
       InputService.validateResume(
-        Map.of("projects", List.of(p)),
-        "预约系统，我负责接口\n另一个项目压测十万请求"
+        Map.of("projects", List.of(first)),
+        "合成简历\n预约系统"
       )
     );
+    first.put("startLine", "2");
+    assertThrows(ResponseStatusException.class, () ->
+      InputService.validateResume(
+        Map.of("projects", List.of(first)),
+        "合成简历\n预约系统"
+      )
+    );
+  }
+
+  @Test
+  void validProjectSurvivesAnotherInvalidProjectAndWarns() {
+    var invalid = candidate();
+    invalid.put("startLine", 1000);
+    var result = InputService.validateResume(
+      Map.of("projects", List.of(candidate(), invalid)),
+      "合成简历\n预约系统，我负责接口"
+    );
+    assertEquals(1, modelObjects(result, "projects", 4).size());
+    assertFalse(((List<?>) result.get("warnings")).isEmpty());
+  }
+
+  @Test
+  void whitespaceMatchingDoesNotAcceptRewrittenFacts() {
+    assertEquals(
+      "Spring\u00A0Boot",
+      ResumeExtraction.quote("Spring\u00A0Boot", "Spring Boot", 100)
+    );
+    assertEquals("", ResumeExtraction.quote("延迟 420ms", "延迟 180ms", 100));
+    assertEquals(
+      "",
+      ResumeExtraction.quote("负责接口", "独立负责全部接口", 100)
+    );
+    assertEquals(
+      "",
+      ResumeExtraction.quote("a\n" + " ".repeat(1000) + "b", "ab", 100)
+    );
+  }
+
+  @Test
+  void numberedLinesKeepOriginalIndicesAndBoundModelPayload() {
+    var lines = ResumeExtraction.lines("合成简历\n\n预约系统\n");
+    assertEquals(
+      List.of(1, 3),
+      lines
+        .stream()
+        .map(line -> line.get("line"))
+        .toList()
+    );
+    assertThrows(ResponseStatusException.class, () ->
+      ResumeExtraction.lines("a\n".repeat(1001))
+    );
+  }
+
+  @Test
+  @org.junit.jupiter.api.condition.EnabledIfSystemProperty(
+    named = "resume.fixture",
+    matches = ".+"
+  )
+  void suppliedDocxIsReadLocallyAndFieldsStayGrounded() throws Exception {
+    var path = java.nio.file.Path.of(System.getProperty("resume.fixture"));
+    String text = inputs.parser.read(
+      file("provided.docx", java.nio.file.Files.readAllBytes(path))
+    );
+    String[] lines = text.split("\n", -1);
+    var titles = new ArrayList<Integer>();
+    for (int i = 0; i < lines.length; i++) {
+      if (
+        lines[i].contains("GitHub") &&
+        (lines[i].contains("|") || lines[i].contains("｜"))
+      ) titles.add(i + 1);
+    }
+    assertFalse(titles.isEmpty());
+    var output = new ArrayList<Map<String, Object>>();
+    for (int i = 0; i < titles.size(); i++) {
+      int start = titles.get(i),
+        end = i + 1 < titles.size() ? titles.get(i + 1) - 1 : lines.length;
+      String name = lines[start - 1].split("[|｜]", 2)[0].strip();
+      output.add(
+        Map.of(
+          "name",
+          name.replaceAll("\\s+", ""),
+          "startLine",
+          start,
+          "endLine",
+          end,
+          "fields",
+          Map.of("responsibility", List.of(Math.min(start + 1, end)))
+        )
+      );
+    }
+    var result = InputService.validateResume(Map.of("projects", output), text);
+    assertEquals(titles.size(), modelObjects(result, "projects", 4).size());
+    for (var project : modelObjects(result, "projects", 4))
+      for (Object value : project.values())
+        assertTrue(
+          value.toString().isEmpty() || text.contains(value.toString())
+        );
   }
 
   @Test
