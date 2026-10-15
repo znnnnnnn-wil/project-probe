@@ -12,13 +12,20 @@ public class TrainingService {
   final ProjectService projects;
   final ModelService model;
   final PaymentService payments;
+  final TrainingHistory history;
 
   @org.springframework.beans.factory.annotation.Autowired
-  TrainingService(Store s, ProjectService projects, ModelService model, PaymentService payments) {
+  TrainingService(
+    Store s,
+    ProjectService projects,
+    ModelService model,
+    PaymentService payments
+  ) {
     this.s = s;
     this.projects = projects;
     this.model = model;
     this.payments = payments;
+    this.history = new TrainingHistory(s, payments);
   }
 
   TrainingService(Store s, ProjectService projects, ModelService model) {
@@ -26,8 +33,15 @@ public class TrainingService {
   }
 
   Map<String, Object> row(String user, String id) {
-    var row = s.one("SELECT * FROM trainings WHERE id=? AND user_id=?", id, user);
-    var order = s.one("SELECT o.* FROM purchase_orders o JOIN training_packages p ON p.order_id=o.id WHERE p.id=?", row.get("package_id"));
+    var row = s.one(
+      "SELECT * FROM trainings WHERE id=? AND user_id=?",
+      id,
+      user
+    );
+    var order = s.one(
+      "SELECT o.* FROM purchase_orders o JOIN training_packages p ON p.order_id=o.id WHERE p.id=?",
+      row.get("package_id")
+    );
     payments.requireScope(order);
     return row;
   }
@@ -39,6 +53,7 @@ public class TrainingService {
     b.put("status", r.get("status"));
     b.put("leaseUntil", r.get("lease_until"));
     b.put("createdAt", r.get("created_at"));
+    if (r.get("history_key") != null) b.put("historyKey", r.get("history_key"));
     b.put("packageId", r.get("package_id"));
     if (
       "DEEP".equals(r.get("kind")) && "COMPLETED".equals(r.get("status"))
@@ -52,15 +67,24 @@ public class TrainingService {
       deep.get("package_id"),
       user
     );
-    var sourceOrder = s.one("SELECT * FROM purchase_orders WHERE id=?", pack.get("order_id"));
+    var sourceOrder = s.one(
+      "SELECT * FROM purchase_orders WHERE id=?",
+      pack.get("order_id")
+    );
     payments.requireScope(sourceOrder);
-    if (!"PAID".equals(sourceOrder.get("status"))) return Map.of("state", "UNAVAILABLE", "packageId", pack.get("id"));
+    if (!"PAID".equals(sourceOrder.get("status"))) return Map.of(
+      "state",
+      "UNAVAILABLE",
+      "packageId",
+      pack.get("id")
+    );
     // 新套餐可为旧报告续费；仍按父训练定位已有复测，避免重复扣次。
     var children = s.db.queryForList(
       "SELECT t.id,t.status,t.package_id FROM trainings t JOIN training_packages p ON p.id=t.package_id JOIN purchase_orders o ON o.id=p.order_id WHERE t.user_id=? AND t.parent_id=? AND t.kind='RETEST' AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy')) ORDER BY t.created_at DESC,t.id DESC",
       user,
       deep.get("id"),
-      payments.mode, payments.scope()
+      payments.mode,
+      payments.scope()
     );
     for (var child : children) {
       String status = str(child, "status");
@@ -75,8 +99,10 @@ public class TrainingService {
         child.get("package_id")
       );
     }
-    boolean available = PaymentService.available(pack, "RETEST") &&
-      (!PaymentService.legacy(pack) || deep.get("id").equals(pack.get("deep_training_id")));
+    boolean available =
+      PaymentService.available(pack, "RETEST") &&
+      (!PaymentService.legacy(pack) ||
+        deep.get("id").equals(pack.get("deep_training_id")));
     if (!available) available = sharedFunding(user) != null;
     return Map.of(
       "state",
@@ -89,21 +115,23 @@ public class TrainingService {
   }
 
   Map<String, Object> sharedFunding(String user) {
-    return payments.packages(user).stream()
-      .filter(p -> !PaymentService.legacy(p) && PaymentService.available(p, "RETEST"))
+    return payments
+      .packages(user)
+      .stream()
+      .filter(
+        p -> !PaymentService.legacy(p) && PaymentService.available(p, "RETEST")
+      )
       .sorted(Comparator.comparing(p -> Boolean.TRUE.equals(p.get("lifetime"))))
-      .findFirst().orElse(null);
+      .findFirst()
+      .orElse(null);
   }
 
   List<Map<String, Object>> all(String user) {
-    return s.db
-      .queryForList(
-        "SELECT t.id FROM trainings t JOIN training_packages p ON p.id=t.package_id JOIN purchase_orders o ON o.id=p.order_id WHERE t.user_id=? AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy')) ORDER BY t.created_at DESC",
-        user, payments.mode, payments.scope()
-      )
-      .stream()
-      .map(r -> get(user, str(r, "id")))
-      .toList();
+    return all(user, false);
+  }
+
+  List<Map<String, Object>> all(String user, boolean summary) {
+    return new TrainingCatalog(s, payments).all(user, summary);
   }
 
   void update(String id, String status, Map<String, Object> body) {
@@ -115,27 +143,54 @@ public class TrainingService {
     );
   }
 
-  Map<String, Object> savePlan(String user, String id, Map<String, Object> input) {
+  Map<String, Object> savePlan(
+    String user,
+    String id,
+    Map<String, Object> input
+  ) {
     return s.locked(user, () -> {
       var r = row(user, id);
-      if (!"COMPLETED".equals(r.get("status"))) throw error(409, "完成训练后才能保存复盘任务");
+      if (!"COMPLETED".equals(r.get("status"))) throw error(
+        409,
+        "完成训练后才能保存复盘任务"
+      );
       var body = s.decode(r.get("body"));
       var report = (Map<String, Object>) body.get("report");
       if (report == null) throw error(409, "报告尚未生成");
-      if (!(input.get("taskIndex") instanceof Number index) ||
-          index.doubleValue() != index.intValue() || index.intValue() < 0 ||
-          index.intValue() >= list(report, "findings").size()) throw error(400, "补充任务不存在");
-      if (!(input.get("done") instanceof Boolean) || !(input.get("note") instanceof String note) ||
-          note.length() > 2000) throw error(400, "任务状态或笔记格式不正确，笔记最多 2000 字");
+      if (
+        !(input.get("taskIndex") instanceof Number index) ||
+        index.doubleValue() != index.intValue() ||
+        index.intValue() < 0 ||
+        index.intValue() >= list(report, "findings").size()
+      ) throw error(400, "补充任务不存在");
+      if (
+        !(input.get("done") instanceof Boolean) ||
+        !(input.get("note") instanceof String note) ||
+        note.length() > 2000
+      ) throw error(400, "任务状态或笔记格式不正确，笔记最多 2000 字");
       int version = ((Number) body.getOrDefault("planVersion", 0)).intValue();
-      if (!(input.get("version") instanceof Number expected) ||
-          expected.doubleValue() != version) throw error(409, "复盘进度已在其他页面更新，请刷新后再保存");
+      if (
+        !(input.get("version") instanceof Number expected) ||
+        expected.doubleValue() != version
+      ) throw error(409, "复盘进度已在其他页面更新，请刷新后再保存");
       var tasks = list(body, "reportPlan");
-      tasks.removeIf(task -> Objects.equals(task.get("taskIndex"), index.intValue()));
-      tasks.add(new LinkedHashMap<>(Map.of(
-        "taskIndex", index.intValue(), "done", input.get("done"),
-        "note", note.strip(), "updatedAt", now()
-      )));
+      tasks.removeIf(task ->
+        Objects.equals(task.get("taskIndex"), index.intValue())
+      );
+      tasks.add(
+        new LinkedHashMap<>(
+          Map.of(
+            "taskIndex",
+            index.intValue(),
+            "done",
+            input.get("done"),
+            "note",
+            note.strip(),
+            "updatedAt",
+            now()
+          )
+        )
+      );
       body.put("planVersion", version + 1);
       update(id, "COMPLETED", body);
       return get(user, id);
@@ -143,6 +198,7 @@ public class TrainingService {
   }
 
   Map<String, Object> start(String user, Map<String, Object> input) {
+    history.backfill(user);
     var training = s.locked(user, () -> {
       String requestKey = required(input, "requestKey", 100);
       var existing = s.db.queryForList(
@@ -153,13 +209,20 @@ public class TrainingService {
       if (!existing.isEmpty()) return get(user, str(existing.get(0), "id"));
       String projectId = required(input, "projectId", 36);
       var project = projects.get(user, projectId);
+      String historyKey = TrainingHistory.key(project, projectId);
       String parent = str(input, "parentId"),
         kind = parent.isBlank() ? "DEEP" : "RETEST";
       Map<String, Object> pack;
       Map<String, Object> parentBody = null;
       if (kind.equals("DEEP")) {
-        var packs = payments.packages(user).stream().filter(p -> PaymentService.available(p, "DEEP"))
-          .sorted(Comparator.comparing(p -> Boolean.TRUE.equals(p.get("lifetime")))).toList();
+        var packs = payments
+          .packages(user)
+          .stream()
+          .filter(p -> PaymentService.available(p, "DEEP"))
+          .sorted(
+            Comparator.comparing(p -> Boolean.TRUE.equals(p.get("lifetime")))
+          )
+          .toList();
         if (packs.isEmpty()) throw error(
           409,
           "没有可用的深挖次数，请先获取训练包"
@@ -177,17 +240,29 @@ public class TrainingService {
           p.get("package_id"),
           user
         );
-        var sourceOrder = s.one("SELECT * FROM purchase_orders WHERE id=?", pack.get("order_id"));
+        var sourceOrder = s.one(
+          "SELECT * FROM purchase_orders WHERE id=?",
+          pack.get("order_id")
+        );
         payments.requireScope(sourceOrder);
-        if (!"PAID".equals(sourceOrder.get("status"))) throw error(409,"该订单需要支付复核，暂不能使用复测权益");
+        if (!"PAID".equals(sourceOrder.get("status"))) throw error(
+          409,
+          "该订单需要支付复核，暂不能使用复测权益"
+        );
         var entry = retestEntry(user, p);
         if (
           Set.of("CONTINUE", "COMPLETED").contains(entry.get("state"))
         ) return get(user, str(entry, "trainingId"));
-        if (!PaymentService.available(pack, "RETEST") ||
-          (PaymentService.legacy(pack) && !parent.equals(pack.get("deep_training_id")))) {
+        if (
+          !PaymentService.available(pack, "RETEST") ||
+          (PaymentService.legacy(pack) &&
+            !parent.equals(pack.get("deep_training_id")))
+        ) {
           pack = sharedFunding(user);
-          if (pack == null) throw error(409, "没有可用的复测次数，请先获取训练套餐");
+          if (pack == null) throw error(
+            409,
+            "没有可用的复测次数，请先获取训练套餐"
+          );
         }
         parentBody = s.decode(p.get("body"));
       }
@@ -199,6 +274,8 @@ public class TrainingService {
         packageId = str(pack, "id");
       var body = new LinkedHashMap<String, Object>();
       body.put("project", project);
+      body.put("historyKey", historyKey);
+      body.putAll(history.context(user, projectId, historyKey, ""));
       body.put("kind", kind);
       body.put("parentId", parent);
       body.put("modelMode", model.mode);
@@ -213,22 +290,14 @@ public class TrainingService {
         focus = str(target, "topic");
       }
       body.put("focus", focus);
-      String question =
-        "请介绍“" +
-        str(project, "name") +
-        "”的背景、请求链路，以及你亲自完成的部分。";
-      body.put(
-        "turns",
-        new ArrayList<>(
-          kind.equals("DEEP")
-            ? List.of(turn(question, "项目介绍与职责"))
-            : List.of()
-        )
-      );
+      body.put("turns", new ArrayList<>());
       body.put("interviewFacts", new ArrayList<>());
-      if (kind.equals("RETEST")) body.put("operation", "FIRST_QUESTION");
+      body.put(
+        "operation",
+        kind.equals("RETEST") ? "FIRST_QUESTION" : "FIRST_DEEP_QUESTION"
+      );
       s.db.update(
-        "INSERT INTO trainings(id,user_id,project_id,package_id,request_key,kind,parent_id,status,body,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO trainings(id,user_id,project_id,package_id,request_key,kind,parent_id,status,body,created_at,history_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         id,
         user,
         projectId,
@@ -236,12 +305,14 @@ public class TrainingService {
         requestKey,
         kind,
         parent.isBlank() ? null : parent,
-        kind.equals("RETEST") ? "PENDING" : "ACTIVE",
+        "PENDING",
         s.encode(body),
-        now()
+        now(),
+        historyKey
       );
       if (!PaymentService.legacy(pack)) s.db.update(
-        "UPDATE training_packages SET training_used=training_used+1 WHERE id=?", packageId
+        "UPDATE training_packages SET training_used=training_used+1 WHERE id=?",
+        packageId
       );
       else if (kind.equals("DEEP")) s.db.update(
         "UPDATE training_packages SET deep_used=TRUE,deep_training_id=? WHERE id=?",
@@ -263,10 +334,7 @@ public class TrainingService {
       return get(user, id);
     });
     // 先持久化训练及权益预留，再在事务外调用模型，失败保留可恢复入口。
-    if (
-      "RETEST".equals(training.get("kind")) &&
-      "PENDING".equals(training.get("status"))
-    ) {
+    if ("PENDING".equals(training.get("status"))) {
       try {
         return generate(user, str(training, "id"));
       } catch (org.springframework.web.server.ResponseStatusException e) {
@@ -281,7 +349,18 @@ public class TrainingService {
 
   Map<String, Object> turn(String question, String topic) {
     return new LinkedHashMap<>(
-      Map.of("id", id(), "question", question, "topic", topic, "answer", "")
+      Map.of(
+        "id",
+        id(),
+        "question",
+        question,
+        "topic",
+        topic,
+        "answer",
+        "",
+        "createdAt",
+        now()
+      )
     );
   }
 
@@ -357,6 +436,7 @@ public class TrainingService {
   }
 
   Map<String, Object> generate(String user, String id) {
+    history.backfill(user);
     String token = id();
     var claim = s.locked(user, () -> {
       var r = row(user, id);
@@ -374,7 +454,31 @@ public class TrainingService {
         now() + 90000,
         id
       );
-      return s.decode(r.get("body"));
+      var body = s.decode(r.get("body"));
+      body.put(
+        "historyKey",
+        r.get("history_key") == null
+          ? TrainingHistory.key(
+              (Map<String, Object>) body.get("project"),
+              str(r, "project_id")
+            )
+          : r.get("history_key")
+      );
+      if (!"REPORT".equals(body.get("operation"))) {
+        var recent = history.context(
+          user,
+          str(r, "project_id"),
+          str(body, "historyKey"),
+          id
+        );
+        body.put("historyTurns", recent.get("historyTurns"));
+        body.put("trainingHistory", recent.get("trainingHistory"));
+        body.putIfAbsent(
+          "historyRoundNumber",
+          recent.get("historyRoundNumber")
+        );
+      }
+      return body;
     });
     if (claim == null) return get(user, id);
     try {
@@ -383,15 +487,40 @@ public class TrainingService {
         model.report(claim)
       );
       else {
-        var q = "FIRST_QUESTION".equals(claim.get("operation"))
-          ? model.firstRetestQuestion(claim)
-          : model.question(claim);
+        var q = switch (str(claim, "operation")) {
+          case "FIRST_QUESTION" -> model.firstRetestQuestion(claim);
+          case "FIRST_DEEP_QUESTION" -> model.firstDeepQuestion(claim);
+          default -> model.question(claim);
+        };
         var turns = list(claim, "turns");
         turns.add(turn(q.question(), q.topic()));
       }
       return s.locked(user, () -> {
         var r = row(user, id);
         if (!token.equals(r.get("generation_token"))) return get(user, id);
+        if (((Number) r.get("lease_until")).longValue() <= now()) throw error(
+          409,
+          "生成已超时，请重试"
+        );
+        if (!"REPORT".equals(claim.get("operation"))) {
+          var turns = list(claim, "turns");
+          var last = turns.get(turns.size() - 1);
+          if (
+            history.repeated(
+              user,
+              str(r, "project_id"),
+              str(claim, "historyKey"),
+              str(last, "question")
+            )
+          ) throw error(503, "模型重复历史问题，请重试");
+          history.index(
+            user,
+            id,
+            str(r, "project_id"),
+            str(claim, "historyKey"),
+            last
+          );
+        }
         claim.remove("error");
         update(
           id,
@@ -417,16 +546,26 @@ public class TrainingService {
       s.locked(user, () -> {
         var r = row(user, id);
         if (token.equals(r.get("generation_token"))) {
-          claim.put(
+          var saved = s.decode(r.get("body"));
+          boolean first = Set.of(
+            "FIRST_QUESTION",
+            "FIRST_DEEP_QUESTION"
+          ).contains(str(saved, "operation"));
+          String savedMessage = first
+            ? "首题生成失败，训练记录已保存。可重试生成或返还本次权益。"
+            : "生成失败，回答已保存。可重试生成或返还本次权益。";
+          saved.put(
             "error",
             e instanceof
               org.springframework.web.server.ResponseStatusException response &&
               ModelService.FREE_QUOTA_ERROR.equals(response.getReason())
               ? ModelService.FREE_QUOTA_ERROR +
-                  "。回答已保存，可恢复训练或返还本次权益。"
-              : "生成失败，回答已保存。可重试生成或返还本次权益。"
+                  (first
+                    ? "。训练记录已保存，可恢复训练或返还本次权益。"
+                    : "。回答已保存，可恢复训练或返还本次权益。")
+              : savedMessage
           );
-          update(id, "FAILED", claim);
+          update(id, "FAILED", saved);
           s.db.update("UPDATE trainings SET lease_until=0 WHERE id=?", id);
         }
         return null;
@@ -451,9 +590,14 @@ public class TrainingService {
       );
       String packageId = str(r, "package_id"),
         field = "DEEP".equals(r.get("kind")) ? "deep_used" : "retest_used";
-      var pack = s.one("SELECT * FROM training_packages WHERE id=? AND user_id=?", packageId, user);
+      var pack = s.one(
+        "SELECT * FROM training_packages WHERE id=? AND user_id=?",
+        packageId,
+        user
+      );
       if (!PaymentService.legacy(pack)) s.db.update(
-        "UPDATE training_packages SET training_used=training_used-1 WHERE id=? AND training_used>0", packageId
+        "UPDATE training_packages SET training_used=training_used-1 WHERE id=? AND training_used>0",
+        packageId
       );
       else s.db.update(
         "UPDATE training_packages SET " + field + "=FALSE WHERE id=?",
