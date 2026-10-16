@@ -264,7 +264,10 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
             {id === "new" && (
               <button
                 className="text-link"
+                disabled={busy || factsDirty}
                 onClick={() => {
+                  if (fields.some(([key]) => String(p[key] ?? "").trim()) &&
+                    !window.confirm("载入合成示例会替换当前填写的材料。是否继续？")) return;
                   setP({ ...demoProject });
                   setDirty(true);
                 }}
@@ -272,6 +275,16 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
                 载入合成示例 <Sparkles size={14} />
               </button>
             )}
+          </div>
+          <div className="material-guide">
+            <strong>先填两项，就能开始</strong>
+            <p>填写项目名称和个人职责，保存后即可体验一题。技术栈、实现和验证细节可以稍后补充。</p>
+            <details>
+              <summary>个人职责怎么写？查看填写参考</summary>
+              <p>围绕一个你亲自参与的功能，写清做了什么、怎么做，以及哪些内容还不确定。</p>
+              <blockquote>合成示例：我负责预约创建接口，用数据库唯一约束处理重复预约；登录模块由同学完成；并发正确性还没有验证。</blockquote>
+              <p>请按实际经历填写。课程项目、协作任务和未验证的内容都可以如实说明。</p>
+            </details>
           </div>
           <p className="material-privacy">
             <ShieldCheck size={15} />
