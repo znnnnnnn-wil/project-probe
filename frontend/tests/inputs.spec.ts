@@ -4,7 +4,7 @@ import { injectSpeechPCM } from "../../scripts/vad-test-audio.mjs";
 
 test.use({
   launchOptions: {
-    channel: "msedge",
+    channel: process.platform === "win32" ? "msedge" : undefined,
     args: [
       "--use-fake-device-for-media-stream",
       "--use-fake-ui-for-media-stream",

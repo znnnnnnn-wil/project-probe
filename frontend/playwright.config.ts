@@ -6,7 +6,7 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:5174",
     headless: true,
-    launchOptions: { channel: "msedge" },
+    launchOptions: { channel: process.platform === "win32" ? "msedge" : undefined },
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
