@@ -19,6 +19,7 @@ import { Button, Loading, PageHead, sourceLabel } from "./ui";
 import type { Actions } from "./ui";
 import { useMounted } from "./use-read-scope";
 import { ProjectPractice } from "./project-practice";
+import "./editor.css";
 
 const fields: [keyof Project, string, string][] = [
   ["name", "项目名称", "例如：校园自习室预约系统"],
@@ -245,6 +246,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           {draftNotice}
         </p>
       )}
+      {id !== "new" && <ProjectPractice projectId={id} disabled={dirty || factsDirty} run={run} busy={busy} />}
       <div className="editor-layout">
         <div className="materials-panel" hidden={step !== "materials"}>
           <div className="panel-heading">
@@ -358,7 +360,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           )}
         </div>
         <div className="facts-panel" hidden={step !== "facts"}>
-          <div className="section-kicker">开始前，先确认</div>
+          <div className="section-kicker">02 · 开始前，先确认</div>
           <h2>项目事实清单</h2>
           <p>
             区分原始材料、推断与待确认信息。核对不意味着每条推断都已被证实。
@@ -367,6 +369,12 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
             <div className="mini-empty">保存档案后，提取需要核对的事实。</div>
           ) : (
             <>
+              {!p.facts.length && <div className="facts-empty">
+                <span className="facts-empty-icon"><ShieldCheck size={28} strokeWidth={1.5} /></span>
+                <h3>让追问建立在你的真实经历上</h3>
+                <p>从已保存的材料中整理项目职责与实现细节，再由你逐条核对。暂时不确定的内容可以保留待确认。</p>
+                <div className="facts-legend"><span>材料提供</span><span>AI 推断</span><span>待确认</span></div>
+              </div>}
               <Button
                 secondary
                 disabled={busy || dirty || factsDirty}
@@ -473,9 +481,8 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           )}
         </div>
         <aside className="training-aside">
-          {id !== "new" && <ProjectPractice projectId={id} disabled={dirty || factsDirty} run={run} busy={busy} />}
           <div className="training-readiness">
-            <h2>本次训练</h2>
+            <div className="training-heading"><span><MessageSquare size={20} /></span><div><small>核对后，进入完整深挖</small><h2>本次训练</h2></div></div>
             <ul className="readiness-list">
               <li>
                 {id === "new" ? <Clock size={15} /> : <Check size={15} />}
@@ -510,6 +517,9 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
                 <option value="BASIC">实习基础与职责</option><option value="IMPLEMENTATION">实现细节</option>
                 <option value="TRADEOFF">故障与方案取舍</option>
               </select></label>
+              {(id === "new" || dirty || factsDirty || !p.factsConfirmed) && <p className="start-prerequisite">
+                <ShieldCheck size={15} />{id === "new" ? "先保存项目材料，再核对事实。" : dirty ? "保存材料修改后，重新核对项目事实。" : "完成事实核对并保存，即可开始深挖。"}
+              </p>}
               <Button
                 disabled={busy || dirty || !p.factsConfirmed || id === "new"}
                 onClick={() => start()}
