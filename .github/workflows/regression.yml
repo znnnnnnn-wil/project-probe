@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   regression:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -52,6 +52,8 @@ jobs:
         working-directory: frontend
       - run: npx playwright install --with-deps chromium
         working-directory: frontend
+      - name: Install local synthetic speech fixture generator
+        run: sudo apt-get install -y espeak-ng
       - name: Verify browser flows with demo model and mock payment
         run: npm run test:e2e
         working-directory: frontend
