@@ -156,9 +156,11 @@ function ReportBody({
           <div className="finding-title">
             <span>{String(i + 1).padStart(2, "0")}</span>
             <h2>{f.topic}</h2>
-            <span className="badge">待补充 / 待验证</span>
+            <span className="badge">{i === 0 ? "优先补充" : "后续补充"} / 待验证</span>
           </div>
           <p>{f.assessment}</p>
+          {f.supportExplanation && <p className="evidence-explanation">判断依据（AI说明）：{f.supportExplanation}</p>}
+          <small>已核对引用来源；技术判断和引用是否支持结论仍需复核。</small>
           {f.evidence.map((e) => (
             <blockquote key={e.turnId}>
               <small>你的原回答 · {e.question}</small>

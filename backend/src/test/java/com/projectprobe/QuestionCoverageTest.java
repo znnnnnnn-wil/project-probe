@@ -5,6 +5,19 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class QuestionCoverageTest {
+  @Test void explicitCompoundPromptsAreRejectedWithoutRejectingOneRequest() {
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> QuestionCoverage.validateBurden(
+      "请说明幂等键如何生成、在哪一层判断冲突，以及重复请求返回什么结果。"));
+    QuestionCoverage.validateBurden("请说明重复请求命中幂等键时返回的结果。");
+    QuestionCoverage.validateBurden("假设请求超时，你会怎样核对数据库状态？");
+  }
+  @Test void explicitUnknownMovesToAnotherGoalInsteadOfRephrasing() {
+    var body = new LinkedHashMap<String, Object>(Map.of("turns", List.of(Map.of("question", "如何处理重复请求？",
+      "topic", "幂等与重试", "answer", "暂时不会，这部分需要补充。"))));
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> QuestionCoverage.validateGoal(
+      Map.of("question", "请说明幂等键生成方式。", "topic", "幂等与重试"), body));
+    QuestionCoverage.validateGoal(Map.of("question", "请说明你亲自负责的接口。", "topic", "职责边界"), body);
+  }
   @Test void selfReportedGapsAreKeptWithoutClaimingMastery() {
     var result = QuestionCoverage.summarize(new LinkedHashMap<>(Map.of("turns", List.of(
       Map.of("topic", "验证", "question", "如何验证", "answer", "尚未验证"),

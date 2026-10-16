@@ -23,6 +23,12 @@ final class QuestionCoverage {
 
   static void validateGoal(Map<String, Object> output, Map<String, Object> body) {
     if ("REVISE_QUESTION".equals(body.get("operation"))) return;
+    var turns = list(body, "turns");
+    if (!turns.isEmpty()) {
+      var last = turns.get(turns.size() - 1);
+      if ("暂时不会，这部分需要补充。".equals(str(last, "answer")) && goal(last).equals(goal(output)))
+        throw error(503, "用户已明确暂时不会此目标，请记录缺口并换一个未覆盖目标");
+    }
     if ("RETEST".equals(body.get("kind"))) {
       String focus = goal(Map.of("question", str(body, "focus")));
       String candidate = goal(Map.of("question", str(output, "question")));
@@ -61,6 +67,14 @@ final class QuestionCoverage {
     var left = grams(a); var right = grams(b); var union = new HashSet<>(left); union.addAll(right);
     left.retainAll(right);
     return !union.isEmpty() && (double) left.size() / union.size() >= 0.86;
+  }
+
+  static void validateBurden(String question) {
+    // 保守识别显式复合询问，不把字数或一个问号误当成单一目标。
+    var requests = java.util.regex.Pattern.compile("如何|怎样|怎么|为什么|为何|哪些|什么|哪一|是否|能否|多少|多长|何时|在哪里").matcher(question);
+    int count = 0;
+    while (requests.find()) if (++count >= 3)
+      throw error(503, "单题并列了多个询问，请只保留一个可独立回答的具体目标");
   }
 
   static Set<String> grams(String text) {
