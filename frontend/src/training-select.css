@@ -2,6 +2,7 @@
   position: relative;
   min-width: 0;
 }
+.training-select > label,
 .editor-page .start-block .training-select > label {
   display: block;
   margin-bottom: 8px;
@@ -58,6 +59,7 @@
   border: 1px solid #e3ebe6;
   border-radius: 10px;
   box-shadow: 0 8px 24px #244c3514;
+  overflow-y: auto;
 }
 .training-select-menu.opens-above {
   top: auto;

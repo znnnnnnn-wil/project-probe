@@ -236,6 +236,13 @@
 .practice-next p { font-size: 12px; color: #748478; }
 .practice-material-preview { margin-top: 20px; padding: 18px; background: #f7faf8; border: 1px solid #e0e9e3; border-radius: 9px; }
 .practice-material-preview label { margin-bottom: 12px; }
+.practice-review { border-top: 1px solid #e0e9e3; padding-block: 22px; }
+.practice-review h3 { font-size: 16px; }
+.practice-review > p { font-size: 12px; color: #748478; }
+.practice-review [role="group"] > span { font-size: 12px; color: #59715f; }
+.review-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 18px; }
+.review-choices button { border: 1px solid #dce7df; border-radius: 7px; padding: 8px 12px; font-size: 12px; background: #fff; }
+.review-choices button[aria-pressed="true"] { background: #e8f3ec; border-color: #8eb8a0; color: #246548; }
 @media (max-width: 740px) {
   .practice-header {
     padding: 20px;

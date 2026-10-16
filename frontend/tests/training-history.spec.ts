@@ -73,7 +73,8 @@ test("训练记录分页、服务端筛选与展开后读取原问答", async ({
   await page.locator(".archive-details summary").click();
   await expect(page.getByText("保留完整原回答", { exact: true })).toBeVisible();
   expect(detailReads).toBe(1);
-  await page.getByLabel("筛选训练项目").selectOption("key-a");
+  await page.getByRole("combobox", { name: /筛选训练项目/ }).click();
+  await page.getByRole("option", { name: "项目甲", exact: true }).click();
   await expect(page.locator(".history-record")).toHaveCount(20);
   await expect(
     page.getByRole("button", { name: "上一页", exact: true }),
@@ -135,7 +136,8 @@ for (const width of [1440, 390]) {
     });
     await page.goto("/#/history");
     await expect(page.locator(".history-record")).toHaveCount(3);
-    await page.getByLabel("筛选训练项目").selectOption(first.historyKey);
+    await page.getByRole("combobox", { name: /筛选训练项目/ }).click();
+    await page.getByRole("option", { name: first.project.name, exact: true }).click();
     await expect(page.locator(".history-record")).toHaveCount(2);
     await page.locator(".history-record summary").first().click();
     await page.locator(".history-record summary").nth(1).click();
@@ -164,7 +166,8 @@ for (const width of [1440, 390]) {
     ).toBeTruthy();
     await page.reload();
     await expect(page.locator(".history-record")).toHaveCount(3);
-    await page.getByLabel("筛选训练项目").selectOption(first.historyKey);
+    await page.getByRole("combobox", { name: /筛选训练项目/ }).click();
+    await page.getByRole("option", { name: first.project.name, exact: true }).click();
     await page.locator(".history-record summary").nth(1).click();
     await expect(
       page.getByText("第一轮：我负责预约接口，实际验证结果待补充。", {

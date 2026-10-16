@@ -19,7 +19,8 @@ test("笔记预览经确认保存，重新核对后选择主题复测", async ({
   const updated = await post(`/projects/${project.id}/extract`);
   await post(`/projects/${project.id}/confirm`, updated);
   await page.reload();
-  await workspace.getByLabel("本轮复测主题").selectOption(report.report.findings[0].topic);
+  await workspace.getByRole("combobox", { name: /本轮复测主题/ }).click();
+  await workspace.getByRole("option", { name: report.report.findings[0].topic, exact: true }).click();
   await workspace.getByRole("button", { name: "开始所选主题复测" }).click();
   await expect(page).toHaveURL(/#\/trainings\//);
   const retest = await (await page.request.get("/api/trainings/" + page.url().split("/").pop())).json();

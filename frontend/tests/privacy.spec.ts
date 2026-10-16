@@ -4,7 +4,8 @@ import { trainingFixture } from "./training-fixture";
 test("公开说明可访问，删除项目须确认且保留订单", async ({ page }) => {
   const { project } = await trainingFixture(page);
   await page.goto("/#/account");
-  await page.getByLabel("要删除的项目").selectOption(project.id);
+  await page.getByRole("combobox", { name: /要删除的项目/ }).click();
+  await page.getByRole("option", { name: project.name, exact: true }).click();
   await page.getByLabel("当前密码（用于数据清理）").fill("synthetic-password-123");
   const remove = page.getByRole("button", { name: "删除所选项目及训练内容" });
   await expect(remove).toBeDisabled();

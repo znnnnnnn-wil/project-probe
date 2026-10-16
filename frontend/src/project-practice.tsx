@@ -5,6 +5,7 @@ import { useProjectPractice } from "./use-project-practice";
 import { ArrowRight, Check, ChevronDown, ChevronUp, MessageSquare, Sparkles } from "lucide-react";
 import "./project-practice.css";
 import { PracticeNext } from "./practice-next";
+import { PracticeReview } from "./practice-review";
 import type { Project } from "./types";
 
 export function ProjectPractice({ projectId, disabled, onSaved, onReview, run, busy }: Actions & {
@@ -51,6 +52,7 @@ export function ProjectPractice({ projectId, disabled, onSaved, onReview, run, b
         <p className="practice-footnote">想连续深挖？核对项目事实后，可使用训练包开始完整训练。</p>
         <PracticeNext projectId={projectId} answer={turn?.answer || ""} disabled={disabled}
           onSaved={onSaved} onReview={onReview} run={run} busy={busy} />
+        <PracticeReview projectId={projectId} run={run} busy={busy} />
       </div>}
       {disabled && <p className="practice-footnote">请先保存当前材料或事实核对修改，再继续体验。</p>}
       {!turn && <p className="practice-footnote">体验不能代替完整事实核对与训练。</p>}

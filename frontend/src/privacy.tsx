@@ -3,6 +3,7 @@ import { api } from "./api";
 import { Button } from "./ui";
 import type { Actions } from "./ui";
 import type { ProjectSummary } from "./types";
+import { TrainingSelect } from "./training-select";
 
 export function PrivacyInfo() {
   return <section className="panel"><h2>隐私与服务说明</h2>
@@ -29,9 +30,8 @@ export function DataControls({ run, busy }: Actions) {
         const result = await api<{ message: string }>("/account/resume-cache", "DELETE"); setNotice(result.message);
       });
     }}>清空简历识别缓存</Button>
-    <label>要删除的项目<select value={project} onChange={e => { setProject(e.target.value); setConfirmation(""); }}>
-      <option value="">选择项目</option>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-    </select></label>
+    <TrainingSelect label="要删除的项目" value={project} onChange={value => { setProject(value); setConfirmation(""); }} disabled={busy}
+      options={[{ value: "", label: "选择项目" }, ...projects.map(p => ({ value: p.id!, label: p.name }))]} />
     <label>当前密码（用于数据清理）<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
     <label>确认文字<input value={confirmation} onChange={e => setConfirmation(e.target.value)} placeholder="删除项目填完整项目名；注销填“注销账户”" /></label>
     <div className="action-row"><Button secondary disabled={busy || !project || !password || confirmation !== projects.find(p => p.id === project)?.name} onClick={() => {
