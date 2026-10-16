@@ -24,7 +24,6 @@ const Home = lazy(() =>
   import("./home").then((module) => ({ default: module.Home })),
 );
 const Account = lazy(() => import("./account").then(module => ({ default: module.Account })));
-const Operator = lazy(() => import("./operator").then(module => ({ default: module.Operator })));
 const PrivacyInfo = lazy(() => import("./privacy").then(module => ({ default: module.PrivacyInfo })));
 const Login = lazy(() =>
   import("./home").then((module) => ({ default: module.Login })),
@@ -118,7 +117,7 @@ function App() {
       !user &&
       path !== "/" &&
       path !== "/login" &&
-      /^\/(projects|trainings|report|shop|history|payment-return|operator)(\/|$)/.test(
+      /^\/(projects|trainings|report|shop|history|payment-return)(\/|$)/.test(
         path,
       )
     ) {
@@ -227,7 +226,7 @@ function App() {
                   go(
                     location.pathname === "/payment-return"
                       ? "/payment-return"
-                      : /^\/(projects|trainings|report|shop|history|operator)(\/|$)/.test(
+                      : /^\/(projects|trainings|report|shop|history)(\/|$)/.test(
                             next,
                           )
                         ? next
@@ -235,7 +234,7 @@ function App() {
                   );
                 }}
               />
-            ) : nav === "operator" ? <Operator {...props} /> : nav === "account" ? <Account {...props} /> : path === "/" || nav === "projects" ? (
+            ) : nav === "account" ? <Account {...props} /> : path === "/" || nav === "projects" ? (
               path === "/" || path === "/projects" ? (
                 <Workspace {...props} />
               ) : (

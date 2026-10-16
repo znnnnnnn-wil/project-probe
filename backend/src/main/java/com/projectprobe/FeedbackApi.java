@@ -11,9 +11,5 @@ class FeedbackApi {
   @GetMapping("/feedback") Object own(HttpServletRequest r) { return feedback.own(auth.user(r)); }
   @PostMapping("/feedback") Object submit(HttpServletRequest r, @RequestBody Map<String, Object> input) { return feedback.submit(auth.user(r), input, ""); }
   @GetMapping("/operator/feedback") Object operator(HttpServletRequest r) { return feedback.operator(auth.user(r)); }
-  @GetMapping("/operator/feedback-page") Object page(HttpServletRequest r, @RequestParam(defaultValue="OPEN") String status,
-      @RequestParam(defaultValue="") String search, @RequestParam(defaultValue="0") int offset) {
-    return feedback.page(auth.user(r), status, search, offset);
-  }
   @PostMapping("/operator/feedback/{id}") void reply(HttpServletRequest r, @PathVariable String id, @RequestBody Map<String, Object> input) { feedback.reply(auth.user(r), id, input); }
 }
