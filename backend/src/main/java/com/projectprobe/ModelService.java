@@ -445,7 +445,7 @@ public class ModelService {
     String focus = str(body, "focus");
     if (mode.equals("demo")) return demoRetestQuestion(body, true);
     return checkedQuestion(
-      "根据 retestTarget 选定的具体薄弱点、previousReport、previousTurns、previousProject 和本轮 project 修订材料生成一个复测首题。必须改变与此薄弱点相关的条件或约束，不能统一套用并发/双实例。报告中的 task 是建议，不能说成用户提出或已实现的方案；本轮材料写明计划或未验证时必须保留该边界。开放询问设计与取舍，不预设某个技术能解决问题或强制采用指定实现。只问一个问题。返回 {question:string,topic:string,changedCondition:string}，topic 必须等于 focus，changedCondition 为新条件的原文并出现在 question 中。不要重复上轮或本轮问题。" , questionInput(body), body, true);
+      "根据 retestTarget 选定的具体薄弱点、previousReport、previousTurns、previousProject 和本轮 project 修订材料生成一个复测首题。必须改变与此薄弱点相关的条件或约束，不能统一套用并发/双实例。报告中的 task 是建议，不能说成用户提出或已实现的方案；本轮材料写明计划或未验证时必须保留该边界。假设条件应内部一致，不能同时说某动作已完成和尚未执行。开放询问设计与取舍，不预设某个技术能解决问题或强制采用指定实现。只问一个问题。返回 {question:string,topic:string,changedCondition:string}，topic 必须等于 focus，changedCondition 为新条件的原文并出现在 question 中。不要重复上轮或本轮问题。" , questionInput(body), body, true);
   }
 
   GeneratedQuestion firstDeepQuestion(Map<String, Object> body) {
@@ -670,7 +670,8 @@ public class ModelService {
       );
     } else out = call(
       "生成证据驱动复盘，返回 {clearParts:string[],findings:[{topic:string,assessment:string,task:string,turnIds:string[],factIds:string[]}],retestTopics:string[]}。三个数组必须显式返回，可为空。turnIds 必须逐字符复制 allowedTurnIds 中的 ID，至少一个，不能使用序号、主题、训练 ID 或自行构造 ID；factIds 只能逐字符复制 allowedFactIds 中的 ID，没有相关事实时返回 []。answeredTurns 是已回答证据，materialFacts 是材料事实。聚焦最多 3 个优先补充的薄弱点，合并相关发现；第一项优先选择用户明确暴露的主要职责、验证缺口或业务风险，不按你提问的先后排序，也不优先罗列尚未确认框架的语法知识。只描述这段回答未说明什么，不从缺少解释推断能力、规范意识、诚实程度或项目真实性。clearParts 不得把计划/假设/提问前提写成已执行的成果。每条引用原文须真正支持该判断，无相关材料则 factIds=[]。topic 不超过 30 字，assessment 不超过 80 字，task 不超过 60 字；每个条目的 turnIds/factIds 最多 2 个。clearParts 最多 3 条，每条不超过 50 字；retestTopics 最多 3 个短主题。不要生成引文或重复材料，服务端将附上原文。无回答时 findings 必须为空。每个finding额外返回supportExplanation（最多120字），明确引用中的哪段信息支持assessment；不足以支持判断时应改为待确认，不得扩张结论。同一核心缺口只保留一项，task仅给一个最小可执行动作及可观察的完成标准。" +
-        ("RETEST".equals(body.get("kind")) ? "另返回comparisons数组，最多一项，围绕focus比较两轮解释。条目为{topic,status,assessment,previousTurnIds,currentTurnIds}，topic等于focus；status只取EXPLAINED/PARTIAL/UNRESOLVED/NOT_COMPARABLE。只比较已表达内容，不将表述进步当实现已验证；条件不同无法比较时用NOT_COMPARABLE。previousTurnIds从previousAnsweredTurns复制PT引用，currentTurnIds从answeredTurns复制T引用，各最多2个；非NOT_COMPARABLE必须同时有两轮证据。assessment最多150字。" : ""),
+        ("RETEST".equals(body.get("kind")) ? "另返回comparisons数组，最多一项，围绕focus比较两轮解释。条目为{topic,status,assessment,previousTurnIds,currentTurnIds}，topic等于focus；status只取EXPLAINED/PARTIAL/UNRESOLVED/NOT_COMPARABLE。只比较已表达内容，不将表述进步当实现已验证；条件不同无法比较时用NOT_COMPARABLE。previousTurnIds从previousAnsweredTurns复制PT引用，currentTurnIds从answeredTurns复制T引用，各最多2个；非NOT_COMPARABLE必须同时有两轮证据。assessment最多150字。" +
+          "两轮指previousAnsweredTurns与answeredTurns，不能把本轮两次回答相同说成前后两轮内容一致。逐项比较旧回答缺口与当前新增解释：例如从不知道如何测试到给出具体数据、预期值和观察方式，属于表达上的补充，即使尚未执行也不能称毫无进展。EXPLAINED表示已解释清楚，PARTIAL表示补充了部分关键说明但仍有缺口，UNRESOLVED表示未增加相关解释；这些状态均不证明实现或测试已通过。assessment分别说明新增内容与仍待验证内容。clearParts只总结本轮原回答明确说明的内容，不照抄旧报告；findings优先本轮仍缺的具体环节，避免沿用旧评价否定新解释。" : ""),
       ReportComparison.input(body, reportInput(project, turns, facts))
     );
     validateStrings(out, "clearParts", 8, 3000);
