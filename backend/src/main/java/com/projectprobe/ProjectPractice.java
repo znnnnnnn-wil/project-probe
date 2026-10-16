@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 @Service
 class ProjectPractice {
   final Store s; final ProjectService projects; final ModelService model;
+  @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
   ProjectPractice(Store s, ProjectService projects, ModelService model) { this.s = s; this.projects = projects; this.model = model; }
   Map<String, Object> get(String user, String project) {
     projects.get(user, project);
@@ -30,6 +31,7 @@ class ProjectPractice {
         project.put("facts", list(project, "facts").stream().filter(f -> Boolean.TRUE.equals(f.get("confirmed"))).toList());
         current = new LinkedHashMap<>(Map.of("project", project, "kind", "TRIAL", "turns", new ArrayList<>(), "modelMode", model.mode));
         s.db.update("INSERT INTO project_trials(user_id,project_id,status,body) VALUES (?,?,?,?)", user, projectId, "PENDING", s.encode(current));
+        journey.record(user, "TRIAL_STARTED", projectId);
       } else {
         var row = s.one("SELECT * FROM project_trials WHERE user_id=?", user);
         if (status.equals("GENERATING") && ((Number) row.get("lease_until")).longValue() > now()) throw error(409, "体验正在生成，请稍后刷新");
@@ -62,7 +64,9 @@ class ProjectPractice {
         var row = s.one("SELECT * FROM project_trials WHERE user_id=?", user);
         if (!token.equals(row.get("lease_token")) || ((Number) row.get("lease_until")).longValue() <= now()) throw error(409, "生成租约已失效，请重试");
         s.db.update("UPDATE project_trials SET status=?,body=?,lease_until=0,lease_token=NULL WHERE user_id=?",
-          claim.containsKey("report") ? "COMPLETED" : "ACTIVE", s.encode(claim), user); return null;
+          claim.containsKey("report") ? "COMPLETED" : "ACTIVE", s.encode(claim), user);
+        if (claim.containsKey("report")) journey.record(user, "TRIAL_COMPLETED", projectId);
+        return null;
       });
     } catch (Exception e) {
       s.db.update("UPDATE project_trials SET status='FAILED',lease_until=0 WHERE user_id=? AND lease_token=?", user, token);

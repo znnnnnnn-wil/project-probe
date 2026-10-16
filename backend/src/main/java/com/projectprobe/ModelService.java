@@ -141,7 +141,9 @@ public class ModelService {
 
   private Map<String, Object> callOwned(String rule, Object data) {
     var body = requestBody(rule, data);
-    for (int attempt = 0; attempt < 2; attempt++) try {
+    for (int attempt = 0; attempt < 2; attempt++) {
+      long started = now(); boolean issued = false, successful = false;
+      try {
       long remaining = questionDeadline.get() - now();
       if (remaining < 1000) throw error(503, "问题生成预算已用尽，请重试");
       var request = HttpRequest.newBuilder(
@@ -152,7 +154,7 @@ public class ModelService {
         .header("Content-Type", "application/json")
         .POST(HttpRequest.BodyPublishers.ofString(s.encode(body)))
         .build();
-      long started = now();
+      issued = true;
       var response = client.send(request, BoundedBody.handler(800000));
       if (response.statusCode() == 429 || response.statusCode() >= 500) {
         if (attempt == 0) continue;
@@ -182,9 +184,11 @@ public class ModelService {
         root.path("usage").path("completion_tokens").asLong(-1),
         now() - started
       );
-      return s.decodeModel(
+      var decoded = s.decodeModel(
         root.path("choices").path(0).path("message").path("content").asText()
       );
+      successful = true;
+      return decoded;
     } catch (org.springframework.web.server.ResponseStatusException e) {
       log.warn(
         "model_call_failed provider={} model={} reason={}",
@@ -208,6 +212,7 @@ public class ModelService {
         503,
         "模型超时或输出格式不正确，可重试；已有回答已保存"
       );
+      } finally { if (issued && usage != null) usage.attempt(model, now() - started, successful); }
     }
     throw error(503, "模型暂不可用");
   }
