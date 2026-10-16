@@ -64,7 +64,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
   const [shop, setShop] = useState<Shop | null>(null);
   const [draftNotice, setDraftNotice] = useState("");
   const [factsDirty, setFactsDirty] = useState(false);
-  const [expanded, setExpanded] = useState(id !== "new");
+  const [expanded, setExpanded] = useState(() => sessionStorage.getItem("project:expand:" + id) === "true");
   const draftKey = "project-draft:" + id;
   const factDraftKey = "fact-draft:" + id;
   const restore = (project: Project) => {
@@ -78,6 +78,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           typeof draft.responsibility === "string"
         ) {
           setP({ ...project, ...draft });
+          setExpanded(true);
           setDirty(true);
           setDraftNotice("已恢复此标签页未保存的材料");
           return;
@@ -118,6 +119,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
   };
   useEffect(() => {
     const controller = new AbortController();
+    sessionStorage.removeItem("project:expand:" + id);
     if (id === "new") restore({ ...emptyProject });
     if (id !== "new")
       run(async () => {
@@ -247,7 +249,14 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           {draftNotice}
         </p>
       )}
-      {id !== "new" && <ProjectPractice projectId={id} disabled={dirty || factsDirty} run={run} busy={busy} />}
+      {id !== "new" && <ProjectPractice projectId={id} disabled={dirty || factsDirty} run={run} busy={busy}
+        onSaved={project => {
+          setP(project); setDirty(false); setFactsDirty(false);
+          sessionStorage.removeItem(draftKey); sessionStorage.removeItem(factDraftKey);
+          setDraftNotice("体验补充已保存，请重新提取并核对事实。");
+        }} onReview={() => {
+          setStep("facts"); requestAnimationFrame(() => document.getElementById("project-facts")?.scrollIntoView({ block: "start" }));
+        }} />}
       <div className="editor-layout">
         <div className="materials-panel" hidden={step !== "materials"}>
           <div className="panel-heading">
@@ -300,7 +309,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
           >
             <div className="form-fields">
               {fields.filter(([key]) => expanded || ["name", "targetRole", "responsibility"].includes(key)).map(([key, label, placeholder], i) => (
-                <label key={key} className={i < 3 ? "" : "wide"}>
+                <label key={key} className={["name", "targetRole", "stack"].includes(key) ? "" : "wide"}>
                   {label}
                   {["name", "targetRole", "stack"].includes(key) ? (
                     <input
@@ -360,7 +369,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
             </div>
           )}
         </div>
-        <div className="facts-panel" hidden={step !== "facts"}>
+        <div id="project-facts" className="facts-panel" hidden={step !== "facts"}>
           <div className="section-kicker">02 · 开始前，先确认</div>
           <h2>项目事实清单</h2>
           <p>

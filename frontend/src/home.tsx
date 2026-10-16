@@ -24,11 +24,12 @@ export function Home({ onStart }: { onStart: () => void }) {
         text="从你亲自实现的项目出发，练清楚细节、取舍与验证。"
         action={
           <Button onClick={onStart}>
-            开始项目练习
+            用我的项目体验一题
             <ArrowRight size={16} />
           </Button>
         }
       />
+      <div className="home-start-note"><strong>先试自己的项目，再决定是否购买。</strong><span>注册后只需填写项目名称和个人职责，即可获得一次真实AI体验。</span></div>
       <div className="sample-layout">
         <aside className="sample-project">
           <FolderOpen size={25} />
@@ -184,7 +185,7 @@ export function Login({
       >
         <h2>{register ? "创建练习账号" : "欢迎回来"}</h2>
         {!register && <button type="button" className="text-link" onClick={() => setRecover(true)}>忘记密码？使用恢复码</button>}
-        <p>使用独立账号保存你的练习进度。</p>
+        <p>使用独立账号保存你的练习进度。注册后请到「账户与数据」生成并保存恢复码，未保存恢复码时无法自助找回密码。</p>
         <label>
           用户名
           <input
