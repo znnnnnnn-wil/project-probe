@@ -266,7 +266,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
                 className="text-link"
                 disabled={busy || factsDirty}
                 onClick={() => {
-                  if (fields.some(([key]) => String(p[key] ?? "").trim()) &&
+                  if (fields.some(([key]) => String(p[key] ?? "").trim() !== String((emptyProject as Partial<Project>)[key] ?? "").trim()) &&
                     !window.confirm("载入合成示例会替换当前填写的材料。是否继续？")) return;
                   setP({ ...demoProject });
                   setDirty(true);
