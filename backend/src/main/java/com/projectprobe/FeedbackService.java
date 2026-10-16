@@ -24,25 +24,12 @@ class FeedbackService {
     });
   }
   List<Map<String, Object>> operator(String user) {
-    metrics.requireOperator(user);
+    metrics.operator(user);
     return s.db.queryForList("SELECT id,kind,body,request_id,training_id,status,reply,created_at FROM user_feedback ORDER BY created_at DESC LIMIT 100");
   }
-  Map<String, Object> page(String user, String status, String search, int offset) {
-    metrics.requireOperator(user);
-    if (!Set.of("OPEN", "RESOLVED", "ALL").contains(status) || search.length() > 100 || offset < 0 || offset > 100000)
-      throw error(400, "反馈筛选参数不正确");
-    String where = " FROM user_feedback WHERE (?='ALL' OR status=?) AND (?='' OR POSITION(? IN id||' '||COALESCE(request_id,''))>0)";
-    long total = s.db.queryForObject("SELECT COUNT(*)" + where, Long.class, status, status, search, search);
-    var items = s.db.queryForList("SELECT id,kind,body,request_id,training_id,status,reply,created_at" + where +
-      " ORDER BY created_at DESC,id DESC LIMIT 20 OFFSET ?", status, status, search, search, offset);
-    return Map.of("items", items, "total", total, "hasMore", offset + items.size() < total);
-  }
   void reply(String user, String id, Map<String, Object> input) {
-    metrics.requireOperator(user); String reply = required(input, "reply", 2000), status = required(input, "status", 20);
+    metrics.operator(user); String reply = required(input, "reply", 2000), status = required(input, "status", 20);
     if (!Set.of("OPEN", "RESOLVED").contains(status)) throw error(400, "处理状态不正确");
-    if (input.containsKey("expectedReply")) {
-      if (s.db.update("UPDATE user_feedback SET reply=?,status=? WHERE id=? AND reply=? AND status=?", reply, status, id,
-          str(input, "expectedReply"), str(input, "expectedStatus")) != 1) throw error(409, "反馈已变化，请刷新后重新核对回复");
-    } else if (s.db.update("UPDATE user_feedback SET reply=?,status=? WHERE id=?", reply, status, id) != 1) throw error(404, "反馈不存在");
+    if (s.db.update("UPDATE user_feedback SET reply=?,status=? WHERE id=?", reply, status, id) != 1) throw error(404, "反馈不存在");
   }
 }
