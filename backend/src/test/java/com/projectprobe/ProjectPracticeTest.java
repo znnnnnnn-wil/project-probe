@@ -28,4 +28,17 @@ class ProjectPracticeTest {
     assertEquals(0, s.db.queryForObject("SELECT COUNT(*) FROM purchase_orders WHERE user_id=?", Integer.class, user));
     assertEquals(0, s.db.queryForObject("SELECT COUNT(*) FROM trainings WHERE user_id=?", Integer.class, user));
   }
+  @Test void expiredQuestionLeaseCanRecoverWithoutGeneratingAnEmptyReport() {
+    String user = id(); s.db.update("INSERT INTO app_users VALUES (?,?,?,?)", user, user, "unused", now());
+    var p = projects.save(user, null, Map.of("name", "合成恢复项目", "responsibility", "接口"));
+    String project = str(p, "id"); practice.run(user, project, Map.of());
+    s.db.update("UPDATE project_trials SET status='GENERATING',lease_until=? WHERE user_id=?", now() + 60000, user);
+    assertEquals("GENERATING", practice.get(user, project).get("status"));
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> practice.run(user, project, Map.of()));
+    s.db.update("UPDATE project_trials SET lease_until=? WHERE user_id=?", now() - 1, user);
+    assertEquals("FAILED", practice.get(user, project).get("status"));
+    var recovered = practice.run(user, project, Map.of());
+    assertEquals("ACTIVE", recovered.get("status"));
+    assertFalse(recovered.containsKey("report"));
+  }
 }

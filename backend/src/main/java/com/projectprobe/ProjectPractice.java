@@ -14,7 +14,10 @@ class ProjectPractice {
     if (rows.isEmpty()) return Map.of("status", "AVAILABLE");
     var row = rows.get(0);
     if (!project.equals(row.get("project_id")) || "CLEARED".equals(row.get("status"))) return Map.of("status", "USED");
-    var result = s.decode(row.get("body")); result.put("status", row.get("status")); return result;
+    var result = s.decode(row.get("body"));
+    long lease = ((Number) row.get("lease_until")).longValue();
+    result.put("status", "GENERATING".equals(row.get("status")) && lease <= now() ? "FAILED" : row.get("status"));
+    result.put("leaseUntil", lease); return result;
   }
   Map<String, Object> run(String user, String projectId, Map<String, Object> input) {
     String token = id();
@@ -34,7 +37,10 @@ class ProjectPractice {
       var turns = list(current, "turns");
       if (!turns.isEmpty()) {
         var turn = turns.get(0); String answer = str(input, "answer").strip();
-        if (status.equals("ACTIVE") && answer.isBlank()) return null;
+        if (answer.isBlank() && str(turn, "answer").isBlank()) {
+          s.db.update("UPDATE project_trials SET status='ACTIVE',lease_until=0,lease_token=NULL WHERE user_id=?", user);
+          return null;
+        }
         if (!answer.isBlank()) {
           if (answer.length() > 3000) throw error(400, "体验回答最多3000字");
           if (!str(turn, "answer").isBlank() && !answer.equals(turn.get("answer"))) throw error(409, "体验回答已提交");
