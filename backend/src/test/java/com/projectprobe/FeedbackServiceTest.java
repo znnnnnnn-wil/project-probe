@@ -24,5 +24,11 @@ class FeedbackServiceTest {
     feedback.reply(other, id, Map.of("reply", "已核查，感谢反馈", "status", "RESOLVED"));
     assertEquals("RESOLVED", feedback.own(user).get(0).get("status"));
     assertEquals("已核查，感谢反馈", feedback.own(user).get(0).get("reply"));
+    assertEquals(1L, ((Number) feedback.page(other, "RESOLVED", id, 0).get("total")).longValue());
+    assertEquals(0L, ((Number) feedback.page(other, "OPEN", id, 0).get("total")).longValue());
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> feedback.page(user, "ALL", "", 0));
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> feedback.reply(other, id,
+      Map.of("reply", "不应覆盖", "status", "RESOLVED", "expectedReply", "旧回复", "expectedStatus", "OPEN")));
+    assertEquals("已核查，感谢反馈", feedback.own(user).get(0).get("reply"));
   }
 }

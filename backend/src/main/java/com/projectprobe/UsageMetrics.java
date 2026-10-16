@@ -56,7 +56,7 @@ class UsageMetrics {
     });
   }
   Map<String, Object> operator(String user) {
-    if (Arrays.stream(operators.split(",")).map(String::strip).noneMatch(user::equals)) throw error(403, "未配置运营统计权限");
+    requireOperator(user);
     var result = new LinkedHashMap<String, Object>();
     result.put("accountRecords", s.db.queryForObject("SELECT COUNT(*) FROM app_users", Long.class));
     result.put("journey", journey.summary());
@@ -69,4 +69,6 @@ class UsageMetrics {
     result.put("note", "按环境区分，只有production才涉及真实资金；金额为订单原金额，退款单独核对，不代表净收入或有效付费用户。");
     return result;
   }
+  boolean isOperator(String user) { return Arrays.stream(operators.split(",")).map(String::strip).anyMatch(user::equals); }
+  void requireOperator(String user) { if (!isOperator(user)) throw error(403, "未配置运营统计权限"); }
 }
