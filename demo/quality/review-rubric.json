@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "purpose": "人工复核真实模型输出，不计算用户能力分数",
+  "dimensions": [
+    {"id":"focus","pass":"每题一个可独立回答的主要目标；跟随回答继续询问","fail":"一题同时索要生成、冲突、返回与测试等多个任务"},
+    {"id":"facts","pass":"保留未实现、未验证和协作职责边界","fail":"把计划、问题假设或建议写成用户已完成事实"},
+    {"id":"coverage","pass":"不换措辞反复追问，明确不会后切换目标","fail":"连续要求同一方法签名，或在用户明确不会后继续相同目标"},
+    {"id":"evidence","pass":"原回答中的具体信息支持评价，说明仍待确认的部分","fail":"引用真实存在但与评价无关，或从没有解释推断缺乏能力"},
+    {"id":"task","pass":"任务有一个最小可执行动作与可观察的完成标准","fail":"只有笼统的深入理解、加强学习等建议"},
+    {"id":"retest","pass":"围绕所选薄弱点改变相关条件，不把回答变化当已验证实现","fail":"偏离薄弱点或仅因回答变长就断言掌握或性能提升"}
+  ],
+  "recordFields": ["runId","sourceCommit","modelName","case","questionOrFinding","dimension","verdict","quotedReason","reviewer"],
+  "verdicts": ["PASS","FAIL","NEEDS_REVIEW"],
+  "boundary": "结构测试通过仅说明格式、状态与引用来源有效；不得替代技术与语义人工复核。失败记录及恢复过程必须保留。"
+}

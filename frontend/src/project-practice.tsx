@@ -45,7 +45,7 @@ export function ProjectPractice({ projectId, disabled, onSaved, onReview, run, b
         <ul className="practice-strengths">{value.report.clearParts.map((s, i) => <li key={i}><Check size={15} />{s}</li>)}</ul>
         <div className="practice-findings">{value.report.findings.map((f, i) => <article key={i}>
           <span className="practice-kicker">改进方向 {String(i + 1).padStart(2, "0")}</span><h4>{f.topic}</h4>
-          <p>{f.assessment}</p><p className="practice-task"><strong>下一步</strong>{f.task}</p>
+          <p>{f.assessment}</p>{f.supportExplanation && <p>判断依据（AI说明）：{f.supportExplanation}</p>}<p className="practice-task"><strong>{i === 0 ? "优先完成" : "下一步"}</strong>{f.task}</p>
           {f.evidence.length > 0 && <details><summary>查看回答依据</summary>{f.evidence.map((e, n) => <blockquote key={e.turnId + n}>{e.quote}</blockquote>)}</details>}
         </article>)}</div>
         <p className="practice-footnote">想连续深挖？核对项目事实后，可使用训练包开始完整训练。</p>

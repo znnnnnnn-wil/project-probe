@@ -223,6 +223,17 @@ class ModelValidationTest {
     assertTrue(list(fake(empty).report(noAnswers), "findings").isEmpty());
   }
 
+  @Test void modelCannotMarkItsOwnConclusionsAsIndependentlyVerified() {
+    var output = valid();
+    finding(output).put("independentlyVerified", true);
+    finding(output).put("supportExplanation", "原回答没有给出测试结果，建议补充可观察的断言。");
+    var result = list(fake(output).report(body()), "findings").get(0);
+    assertFalse(result.containsKey("independentlyVerified"));
+    assertEquals("SOURCE_CHECKED_NEEDS_REVIEW", result.get("evidenceStatus"));
+    assertEquals(1, result.get("priority"));
+    assertTrue(str(result, "supportExplanation").contains("原回答"));
+  }
+
   @Test
   void localEvidenceReferencesResolveExactlyAndRejectUnknownOrUnansweredIds() {
     var output = valid();

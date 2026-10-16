@@ -26,6 +26,8 @@ export function reportMarkdown(training: Training) {
       "自报进度：" + (plan?.done ? "已补充（未独立验证）" : "待补充"),
     );
     if (plan?.note) lines.push("", "我的补充笔记：", plan.note);
+    if (finding.supportExplanation) lines.push("", "判断依据（AI说明）：" + finding.supportExplanation);
+    lines.push("", "已核对引用来源；技术判断和引用是否支持结论仍需复核。");
     finding.evidence.forEach((e) =>
       lines.push("", "追问：" + e.question, "", "原回答：", e.quote),
     );

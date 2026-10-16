@@ -43,6 +43,9 @@ export type ProjectSummary = Pick<
   "id" | "version" | "name" | "stack" | "background" | "factsConfirmed"
 >;
 export type Finding = {
+  priority?: number;
+  supportExplanation?: string;
+  evidenceStatus?: string;
   topic: string;
   assessment: string;
   task: string;
