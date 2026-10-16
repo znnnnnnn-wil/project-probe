@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class TrainingService {
+  @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
 
   final Store s;
   final ProjectService projects;
@@ -322,6 +323,7 @@ public class TrainingService {
         now(),
         historyKey
       );
+      if (journey != null) journey.record(user, kind.equals("RETEST") ? "RETEST_STARTED" : "TRAINING_STARTED", id);
       if (!PaymentService.legacy(pack)) s.db.update(
         "UPDATE training_packages SET training_used=training_used+1 WHERE id=?",
         packageId
@@ -543,6 +545,7 @@ public class TrainingService {
           );
         }
         claim.remove("error");
+        if ("REPORT".equals(claim.get("operation"))) if (journey != null) journey.record(user, "REPORT_COMPLETED", id);
         update(
           id,
           "REPORT".equals(claim.get("operation")) ? "COMPLETED" : "ACTIVE",

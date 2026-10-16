@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 public class Auth {
 
   final Store s;
+  @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
   final boolean secure;
   final BCryptPasswordEncoder encoder = new BCryptPasswordEncoder(12);
 
@@ -94,6 +95,7 @@ public class Auth {
       now() + 7 * 86400000L
     );
     cookie(res, token, 7 * 86400);
+    if (register) journey.record(user, "REGISTERED", user);
     return Map.of("id", user, "username", name);
   }
 

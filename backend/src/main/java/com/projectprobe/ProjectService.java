@@ -10,6 +10,7 @@ public class ProjectService {
 
   final Store s;
   final ModelService model;
+  @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
 
   @org.springframework.beans.factory.annotation.Value(
     "${app.extraction-daily-limit:20}"
@@ -142,6 +143,7 @@ public class ProjectService {
         version,
         s.encode(body)
       );
+      if (journey != null) journey.record(user, "MATERIAL_SAVED", id);
       return get(user, id);
     });
   }
@@ -259,6 +261,7 @@ public class ProjectService {
       // 确认表示已审阅；未确认的推断仍保留原类别。
       b.put("factsConfirmed", true);
       persist(id, b);
+      if (journey != null) journey.record(user, "FACTS_CONFIRMED", id);
       return b;
     });
   }
