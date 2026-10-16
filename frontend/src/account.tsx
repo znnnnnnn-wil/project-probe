@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api } from "./api";
 import { Button, PageHead } from "./ui";
 import type { Actions } from "./ui";
@@ -10,7 +10,10 @@ export function Account({ run, busy }: Actions) {
   const [password, setPassword] = useState("");
   const [next, setNext] = useState("");
   const [code, setCode] = useState("");
+  const [access, setAccess] = useState<{ userId: string; operator: boolean } | null>(null);
+  useEffect(() => { const c = new AbortController(); api<typeof access>("/account/access", "GET", undefined, c.signal).then(setAccess).catch(() => {}); return () => c.abort(); }, []);
   return <section className="page"><PageHead eyebrow="账户设置" title="账户与数据" text="保管恢复码，管理密码与个人材料。" />
+    {access && <p>账户编号：<code>{access.userId}</code>{access.operator && <> · <a href="#/operator">进入运营工作台</a></>}</p>}
     <div className="panel"><h2>账户恢复</h2><p>验证当前密码后生成一次性恢复码，仅本次显示。请离线妥善保管；重新生成会使旧码失效。没有恢复码时无法自助找回。</p>
       <label>当前密码<input type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} /></label>
       <Button disabled={busy || !password} onClick={() => run(async () => {
