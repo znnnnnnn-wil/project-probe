@@ -19,3 +19,60 @@ test("新用户只填必要材料即可一题体验，无订单和权益消费",
   await page.reload();
   await expect(trial.getByRole("heading", { name: "针对你的回答" })).toBeVisible();
 });
+
+test("体验草稿刷新与返回后保留，读取失败必须显式重试", async ({ page }) => {
+  const origin = new URL(test.info().project.use.baseURL!).origin;
+  const post = async (path: string, data: unknown) => {
+    const r = await page.request.post("/api" + path, { headers: { Origin: origin }, data });
+    expect(r.ok()).toBeTruthy(); return r.json();
+  };
+  await post("/auth/register", { username: "draft-trial-" + crypto.randomUUID(), password: "synthetic-trial-password" });
+  const p = await post("/projects", { name: "草稿体验", responsibility: "预约接口" });
+  const active = await post(`/projects/${p.id}/practice`, {});
+  await page.goto(`/#/projects/${p.id}`);
+  const trial = page.getByRole("region", { name: "我的项目一题体验" });
+  await trial.getByLabel("体验回答").fill("未提交的合成回答：数据库唯一约束。");
+  page.on("dialog", dialog => dialog.accept());
+  await page.reload();
+  await expect(trial.getByLabel("体验回答")).toHaveValue("未提交的合成回答：数据库唯一约束。");
+  await page.goto("/#/account");
+  await page.goto(`/#/projects/${p.id}`);
+  await expect(trial.getByLabel("体验回答")).toHaveValue("未提交的合成回答：数据库唯一约束。");
+  let failed = true, writes = 0;
+  await page.route(`**/api/projects/${p.id}/practice`, async route => {
+    if (route.request().method() !== "GET") { writes++; await route.abort(); return; }
+    if (failed) await route.fulfill({ status: 503, json: { message: "合成状态读取失败" } });
+    else await route.fulfill({ json: active });
+  });
+  await page.reload();
+  await expect(trial.getByRole("alert")).toContainText("合成状态读取失败");
+  await expect(trial.getByRole("button", { name: "开始一题体验", exact: true })).toHaveCount(0);
+  failed = false;
+  await trial.getByRole("button", { name: "重新读取体验状态" }).click();
+  await expect(trial.getByLabel("体验回答")).toHaveValue("未提交的合成回答：数据库唯一约束。");
+  expect(writes).toBe(0);
+});
+
+test("刷新遇到正在生成只轮询读取，不重复提交", async ({ page }) => {
+  const id = "22222222-2222-4222-8222-222222222222";
+  let reads = 0, writes = 0;
+  await page.route("**/api/**", async route => {
+    const path = new URL(route.request().url()).pathname;
+    let json;
+    if (path === "/api/config") json = { modelMode: "demo", paymentMode: "mock" };
+    else if (path === "/api/me") json = { id: "synthetic", username: "生成恢复" };
+    else if (path === "/api/projects/" + id) json = { id, version: 1, name: "合成项目", responsibility: "接口", resume: "", facts: [] };
+    else if (path.endsWith("/practice")) {
+      if (route.request().method() !== "GET") { writes++; await route.abort(); return; }
+      reads++;
+      json = reads === 1 ? { status: "GENERATING" } : { status: "ACTIVE", turns: [{ id: "turn", question: "请说明预约流程。", answer: "" }] };
+    } else if (path === "/api/trainings") json = [];
+    else if (path === "/api/shop") json = { orders: [], packages: [] };
+    else throw Error(path);
+    await route.fulfill({ json });
+  });
+  await page.goto(`/#/projects/${id}`);
+  await expect(page.getByRole("button", { name: "正在生成，自动恢复进度…" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "请说明预约流程。" })).toBeVisible();
+  expect(reads).toBeGreaterThan(1); expect(writes).toBe(0);
+});

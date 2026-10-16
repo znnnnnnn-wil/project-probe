@@ -1,29 +1,19 @@
-import React, { useEffect, useState } from "react";
-import { api } from "./api";
+import React, { useState } from "react";
 import { Button } from "./ui";
 import type { Actions } from "./ui";
-import type { Report, Turn } from "./types";
+import { useProjectPractice } from "./use-project-practice";
 import { ArrowRight, Check, ChevronDown, ChevronUp, MessageSquare, Sparkles } from "lucide-react";
 import "./project-practice.css";
 
-type Practice = { status: string; turns?: Turn[]; report?: Report; modelMode?: string };
 export function ProjectPractice({ projectId, disabled, run, busy }: Actions & { projectId: string; disabled: boolean }) {
-  const [value, setValue] = useState<Practice>({ status: "AVAILABLE" });
-  const [answer, setAnswer] = useState(""); const [error, setError] = useState("");
+  const { value, answer, edit, error, loadError, pending, notice, submitted, load, submit } = useProjectPractice(projectId);
   const [expanded, setExpanded] = useState(true);
-  const [pending, setPending] = useState(false);
-  useEffect(() => { const controller = new AbortController();
-    api<Practice>(`/projects/${projectId}/practice`, "GET", undefined, controller.signal).then(setValue).catch(() => {});
-    return () => controller.abort();
-  }, [projectId]);
-  const submit = () => run(async () => { setError(""); setPending(true); try {
-    const next = await api<Practice>(`/projects/${projectId}/practice`, "POST", answer.trim() ? { answer } : {}); setValue(next);
-    setExpanded(true);
-  } catch (e) { setError(e instanceof Error ? e.message : "体验失败"); setValue(v => ({ ...v, status: "FAILED" })); }
-    finally { setPending(false); } });
   const turn = value.turns?.[0];
-  const action = <Button disabled={busy || disabled || (value.status === "ACTIVE" && !answer.trim())} onClick={submit}>
-    {pending ? "正在生成…" : value.status === "ACTIVE" ? "提交体验回答" : value.status === "AVAILABLE" ? "开始一题体验" : "重试或恢复体验"}<ArrowRight size={16} />
+  const waiting = pending || ["LOADING", "GENERATING"].includes(value.status);
+  const action = <Button disabled={busy || (!loadError && (disabled || waiting || (value.status === "ACTIVE" && !answer.trim())))} onClick={() => {
+    setExpanded(true); if (loadError) void load(); else void run(submit);
+  }}>
+    {loadError ? "重新读取体验状态" : value.status === "LOADING" ? "正在读取…" : pending || value.status === "GENERATING" ? "正在生成，自动恢复进度…" : value.status === "ACTIVE" ? "提交体验回答" : value.status === "AVAILABLE" ? "开始一题体验" : "重试或恢复体验"}<ArrowRight size={16} />
   </Button>;
   return <section className="practice-card" aria-label="我的项目一题体验">
     <div className="practice-header">
@@ -44,7 +34,7 @@ export function ProjectPractice({ projectId, disabled, run, busy }: Actions & { 
           {value.modelMode && <small>{value.modelMode === "demo" ? "规则演示，非AI评估" : "真实AI反馈，技术建议仍需核对"}</small>}
         </div>
         {!value.report && <div className="practice-answer"><label>体验回答
-          <textarea rows={6} maxLength={3000} disabled={busy || disabled} value={answer} onChange={e => setAnswer(e.target.value)} placeholder="从你的职责、具体实现和验证方式说起…" />
+          <textarea rows={6} maxLength={3000} disabled={busy || disabled || waiting || loadError || submitted} value={answer} onChange={e => edit(e.target.value)} placeholder="从你的职责、具体实现和验证方式说起…" />
         </label><div className="practice-answer-actions"><small>{answer.length} / 3000</small>{action}</div></div>}
       </div>}
       {value.report && <div className="practice-feedback"><h3>针对你的回答</h3>
@@ -58,7 +48,7 @@ export function ProjectPractice({ projectId, disabled, run, busy }: Actions & { 
       </div>}
       {disabled && <p className="practice-footnote">请先保存当前材料或事实核对修改，再继续体验。</p>}
       {!turn && <p className="practice-footnote">体验不能代替完整事实核对与训练。</p>}
-    </>}{error && <p className="practice-error" role="alert">{error}</p>}
+    </>}{notice && <p className="practice-footnote" role="status">{notice}</p>}{error && <p className="practice-error" role="alert">{error}</p>}
     </div>
   </section>;
 }
