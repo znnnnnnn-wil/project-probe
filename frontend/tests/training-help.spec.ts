@@ -9,7 +9,8 @@ test("澄清保留草稿和训练次数，不会可以显式提交后继续", as
   await page.getByRole("button", { name: "请解释题意" }).click();
   await expect(page.getByRole("heading", { name: /调整次数/ })).toBeVisible();
   await expect(page.getByLabel("你的回答", { exact: true })).toHaveValue("尚未提交的合成草稿");
-  await page.getByLabel("问题类型").selectOption("FEEDBACK");
+  await page.getByRole("combobox", { name: /问题类型/ }).click();
+  await page.getByRole("option", { name: "反馈重复或不准确的问题", exact: true }).click();
   await page.getByLabel("具体说明").fill("这道题需要更明确的条件");
   await page.getByRole("button", { name: "保存问题反馈" }).click();
   await expect(page.getByText("问题反馈已保存。", { exact: true })).toBeVisible();

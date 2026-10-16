@@ -5,6 +5,7 @@ import type { Training, TrainingSummary, ListPage } from "./types";
 import { Empty, Loading, PageHead, statusLabel, Button } from "./ui";
 import type { Actions } from "./ui";
 import { useApiResource } from "./use-api-resource";
+import { TrainingSelect } from "./training-select";
 
 function Transcript({ id }: { id: string }) {
   const { data, error, reload } = useApiResource<Training>("/trainings/" + id);
@@ -100,24 +101,9 @@ export function History(_props: Actions) {
         text="刷新或离开页面不会丢失已提交的回答，继续原训练不重复扣次。"
       />
       <div className="panel history-list">
-        <label className="history-filter">
-          项目
-          <select
-            aria-label="筛选训练项目"
-            value={key}
-            onChange={(event) => {
-              setKey(event.target.value);
-              setOffset(0);
-            }}
-          >
-            <option value="">全部项目</option>
-            {choices.data?.map((choice) => (
-              <option key={choice.key} value={choice.key}>
-                {choice.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <TrainingSelect label="筛选训练项目" value={key} disabled={_props.busy || !choices.data}
+          onChange={value => { setKey(value); setOffset(0); }}
+          options={[{ value: "", label: "全部项目" }, ...(choices.data || []).map(choice => ({ value: choice.key, label: choice.name }))]} />
         {choices.error && (
           <p role="alert">
             {choices.error}{" "}

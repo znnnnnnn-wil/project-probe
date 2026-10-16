@@ -3,6 +3,7 @@ import { api } from "./api";
 import { Button } from "./ui";
 import type { Training } from "./types";
 import type { Actions } from "./ui";
+import { TrainingSelect } from "./training-select";
 
 export function TrainingHelp({ training, run, busy, onUpdated, onUnknown }: Actions & {
   training: Training; onUpdated: (t: Training) => void; onUnknown: () => void;
@@ -22,9 +23,8 @@ export function TrainingHelp({ training, run, busy, onUpdated, onUnknown }: Acti
       <Button secondary disabled={busy} onClick={onUnknown}>暂时不会，记录后继续</Button>
       <Button secondary disabled={busy} onClick={() => send("CLARIFY")}>请解释题意</Button>
     </div>
-    <label>问题类型<select value={kind} onChange={e => setKind(e.target.value)}>
-      <option value="CORRECT">题目假设不符合我的项目</option><option value="FEEDBACK">反馈重复或不准确的问题</option>
-    </select></label>
+    <TrainingSelect label="问题类型" value={kind} onChange={setKind} disabled={busy}
+      options={[{ value: "CORRECT", label: "题目假设不符合我的项目" }, { value: "FEEDBACK", label: "反馈重复或不准确的问题" }]} />
     <label>具体说明<textarea rows={3} maxLength={1000} value={detail} onChange={e => setDetail(e.target.value)} /></label>
     <Button secondary disabled={busy || !detail.trim()} onClick={() => send(kind)}>
       {kind === "CORRECT" ? "提交纠正并调整题目" : "保存问题反馈"}</Button>

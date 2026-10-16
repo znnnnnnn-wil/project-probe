@@ -3,6 +3,7 @@ import { api, go } from "./api";
 import { Button } from "./ui";
 import type { Actions } from "./ui";
 import type { Project, Training, TrainingSummary } from "./types";
+import { TrainingSelect } from "./training-select";
 
 export function RetestWorkspace({ training, run, busy }: Actions & { training: Training }) {
   const [project, setProject] = useState<Project | null>(null);
@@ -61,11 +62,8 @@ export function RetestWorkspace({ training, run, busy }: Actions & { training: T
       })}>确认保存到项目材料</Button>
       {preview.length > 12000 && <p role="alert">材料超过12000字，请先在项目中整理。</p>}
     </div>}
-    <label>本轮复测主题<select aria-label="本轮复测主题" value={focus} onChange={e => {
-      setFocus(e.target.value); key.current = crypto.randomUUID();
-    }}><option value="">请选择一个薄弱点</option>{topics.map(topic =>
-      <option key={topic} value={topic}>{topic}</option>,
-    )}</select></label>
+    <TrainingSelect label="本轮复测主题" value={focus} onChange={value => { setFocus(value); key.current = crypto.randomUUID(); }} disabled={busy}
+      options={[{ value: "", label: "请选择一个薄弱点" }, ...topics.map(topic => ({ value: topic, label: topic }))]} />
     <ul>{topics.map(topic => {
       const related = rounds.filter(r => r.focus === topic && r.status !== "REFUNDED");
       const ongoing = related.find(r => r.status !== "COMPLETED");

@@ -28,6 +28,8 @@ export function TrainingSelect({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(selected);
   const [above, setAbove] = useState(false);
+  const [height, setHeight] = useState(320);
+  const typed = useRef({ text: "", time: 0 });
 
   useEffect(() => {
     if (disabled) setOpen(false);
@@ -38,17 +40,21 @@ export function TrainingSelect({
       if (!root.current?.contains(event.target as Node)) setOpen(false);
     };
     document.addEventListener("pointerdown", outside);
-    return () => document.removeEventListener("pointerdown", outside);
+    const close = () => setOpen(false);
+    window.addEventListener("resize", close);
+    return () => { document.removeEventListener("pointerdown", outside); window.removeEventListener("resize", close); };
   }, [open]);
+  useEffect(() => {
+    if (open) document.getElementById(id + "-option-" + active)?.scrollIntoView({ block: "nearest" });
+  }, [open, active, id]);
 
   const show = () => {
     if (disabled) return;
     const rect = trigger.current?.getBoundingClientRect();
-    if (rect)
-      setAbove(
-        innerHeight - rect.bottom < options.length * 44 + 24 &&
-          rect.top > innerHeight - rect.bottom,
-      );
+    if (rect) {
+      const up = innerHeight - rect.bottom < Math.min(320, options.length * 44 + 24) && rect.top > innerHeight - rect.bottom;
+      setAbove(up); setHeight(Math.max(44, Math.min(320, up ? rect.top - 36 : innerHeight - rect.bottom - 12)));
+    }
     setActive(selected);
     setOpen(true);
   };
@@ -84,6 +90,13 @@ export function TrainingSelect({
       event.preventDefault();
       setOpen(false);
     } else if (event.key === "Tab") setOpen(false);
+    else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      const letter = event.key.toLocaleLowerCase();
+      const text = Date.now() - typed.current.time > 750 ? letter : typed.current.text + letter;
+      typed.current = { text, time: Date.now() };
+      const match = options.findIndex(option => option.label.toLocaleLowerCase().startsWith(text));
+      if (match >= 0) { event.preventDefault(); if (!open) show(); setActive(match); }
+    }
   };
 
   return (
@@ -122,6 +135,7 @@ export function TrainingSelect({
           role="listbox"
           aria-labelledby={id + "-label"}
           className={"training-select-menu" + (above ? " opens-above" : "")}
+          style={{ maxHeight: height }}
         >
           {options.map((option, index) => (
             <button

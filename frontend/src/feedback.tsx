@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import { Button } from "./ui";
 import type { Actions } from "./ui";
+import { TrainingSelect } from "./training-select";
 
 type Feedback = { id: string; kind: string; body: string; status: string; reply: string };
 export function FeedbackForm({ run, busy }: Actions) {
@@ -13,7 +14,7 @@ export function FeedbackForm({ run, busy }: Actions) {
     return () => controller.abort();
   }, []);
   return <section className="panel"><h2>问题与售后反馈</h2><p>反馈保存在站内，可在这里查看处理回复；不发送外部消息。不填写密码、恢复码或支付凭据。</p>
-    <label>反馈类型<select value={kind} onChange={e => setKind(e.target.value)}><option value="GENERAL">产品体验</option><option value="PAYMENT">订单与支付</option><option value="ACCOUNT">账户与数据</option></select></label>
+    <TrainingSelect label="反馈类型" value={kind} onChange={setKind} disabled={busy} options={[{ value: "GENERAL", label: "产品体验" }, { value: "PAYMENT", label: "订单与支付" }, { value: "ACCOUNT", label: "账户与数据" }]} />
     <label>问题描述<textarea rows={3} value={detail} maxLength={2000} onChange={e => setDetail(e.target.value)} /></label>
     <label>请求编号（可选）<input value={requestId} maxLength={36} onChange={e => setRequestId(e.target.value)} /></label>
     <Button disabled={busy || !detail.trim()} onClick={() => run(async () => {

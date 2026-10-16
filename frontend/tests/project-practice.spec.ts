@@ -29,6 +29,14 @@ test("新用户只填必要材料即可一题体验，无订单和权益消费",
   await expect(trial.getByText("这段回答已在项目材料中，无需重复加入。")).toBeVisible();
   await trial.getByRole("button", { name: "前往事实核对", exact: true }).click();
   await expect(page.getByRole("heading", { name: "项目事实清单" })).toBeVisible();
+  const review = page.getByRole("region", { name: "自愿体验反馈" });
+  await review.getByRole("button", { name: "4分", exact: true }).click();
+  await review.getByRole("button", { name: "愿意继续", exact: true }).click();
+  await review.getByLabel("最卡住的一步（可选）").fill("合成调研：需要明确下一步。");
+  await review.getByRole("button", { name: "保存体验反馈" }).click();
+  await expect(review.getByRole("status")).toContainText("已记录这次体验反馈");
+  const feedback = await (await page.request.get("/api/feedback")).json();
+  expect(feedback.filter((item: { body: string }) => item.body.includes("非付费记录"))).toHaveLength(1);
   expect((await (await page.request.get("/api/shop")).json()).orders).toHaveLength(0);
   await page.reload();
   await expect(trial.getByRole("heading", { name: "针对你的回答" })).toBeVisible();
