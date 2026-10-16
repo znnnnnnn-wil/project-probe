@@ -6,8 +6,15 @@ test("新用户只填必要材料即可一题体验，无订单和权益消费",
   await page.getByLabel("密码", { exact: true }).fill("synthetic-trial-password");
   await page.getByRole("button", { name: "注册并开始" }).click();
   await page.goto("/#/projects/new");
+  await expect(page.getByText("先填两项，就能开始", { exact: true })).toBeVisible();
+  await page.getByText("个人职责怎么写？查看填写参考", { exact: true }).click();
+  await expect(page.getByText(/合成示例：我负责预约创建接口/)).toBeVisible();
   await page.getByLabel("项目名称", { exact: true }).fill("合成试练项目");
   await page.getByLabel("个人职责（必填）", { exact: true }).fill("我实现预约接口和数据库唯一约束。");
+  page.once("dialog", dialog => dialog.dismiss());
+  await page.getByRole("button", { name: "载入合成示例" }).click();
+  await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue("合成试练项目");
+  await expect(page.getByLabel("个人职责（必填）", { exact: true })).toHaveValue("我实现预约接口和数据库唯一约束。");
   await page.getByRole("button", { name: "保存项目材料", exact: true }).click();
   const trial = page.getByRole("region", { name: "我的项目一题体验" });
   await trial.getByRole("button", { name: "开始一题体验", exact: true }).click();

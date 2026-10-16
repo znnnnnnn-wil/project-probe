@@ -199,6 +199,25 @@
   font-size: 13px;
   color: #425c51;
 }
+.material-guide {
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border: 1px solid #dfebe5;
+  border-radius: 10px;
+  background: #f7faf8;
+  color: #425c51;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.material-guide strong { font-size: 15px; }
+.material-guide p { margin: 6px 0; }
+.material-guide summary { cursor: pointer; color: #236654; }
+.material-guide blockquote {
+  margin: 10px 0;
+  padding-left: 12px;
+  border-left: 3px solid #b9d1c4;
+  color: #536e60;
+}
 .editor-page .form-fields :is(input, textarea) {
   border-radius: 8px;
   font-size: 14px;
