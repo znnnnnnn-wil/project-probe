@@ -11,6 +11,8 @@
   --paper: #fff;
   --soft: #eef4f2;
 }
+.home-start-note { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 18px 22px; margin-bottom: 28px; background: #edf6f1; border: 1px solid #dce9e0; border-radius: 10px; color: #35634e; font-size: 13px; line-height: 1.8; }
+.home-start-note span { color: #718779; }
 * {
   box-sizing: border-box;
 }

@@ -50,6 +50,7 @@ for (const viewport of [
       fullPage: true,
     });
     await page.getByRole("link", { name: "进入项目", exact: true }).click();
+    await page.getByRole("button", { name: "展开技术栈、实现与验证等补充材料" }).click();
     await page
       .getByLabel("验证方式", { exact: true })
       .fill("未保存的合成验证笔记");

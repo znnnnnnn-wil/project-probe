@@ -4,8 +4,12 @@ import type { Actions } from "./ui";
 import { useProjectPractice } from "./use-project-practice";
 import { ArrowRight, Check, ChevronDown, ChevronUp, MessageSquare, Sparkles } from "lucide-react";
 import "./project-practice.css";
+import { PracticeNext } from "./practice-next";
+import type { Project } from "./types";
 
-export function ProjectPractice({ projectId, disabled, run, busy }: Actions & { projectId: string; disabled: boolean }) {
+export function ProjectPractice({ projectId, disabled, onSaved, onReview, run, busy }: Actions & {
+  projectId: string; disabled: boolean; onSaved: (project: Project) => void; onReview: () => void;
+}) {
   const { value, answer, edit, error, loadError, pending, notice, submitted, load, submit } = useProjectPractice(projectId);
   const [expanded, setExpanded] = useState(true);
   const turn = value.turns?.[0];
@@ -45,6 +49,8 @@ export function ProjectPractice({ projectId, disabled, run, busy }: Actions & { 
           {f.evidence.length > 0 && <details><summary>查看回答依据</summary>{f.evidence.map((e, n) => <blockquote key={e.turnId + n}>{e.quote}</blockquote>)}</details>}
         </article>)}</div>
         <p className="practice-footnote">想连续深挖？核对项目事实后，可使用训练包开始完整训练。</p>
+        <PracticeNext projectId={projectId} answer={turn?.answer || ""} disabled={disabled}
+          onSaved={onSaved} onReview={onReview} run={run} busy={busy} />
       </div>}
       {disabled && <p className="practice-footnote">请先保存当前材料或事实核对修改，再继续体验。</p>}
       {!turn && <p className="practice-footnote">体验不能代替完整事实核对与训练。</p>}

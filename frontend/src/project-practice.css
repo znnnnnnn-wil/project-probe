@@ -231,6 +231,11 @@
   color: #9c503d;
   background: #fcf3ed;
 }
+.practice-next { margin-top: 4px; padding: 22px 0; border-top: 1px solid #e0e9e3; }
+.practice-next > h3 { font-size: 16px; margin-bottom: 10px; }
+.practice-next p { font-size: 12px; color: #748478; }
+.practice-material-preview { margin-top: 20px; padding: 18px; background: #f7faf8; border: 1px solid #e0e9e3; border-radius: 9px; }
+.practice-material-preview label { margin-bottom: 12px; }
 @media (max-width: 740px) {
   .practice-header {
     padding: 20px;

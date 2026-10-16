@@ -381,7 +381,7 @@ export function ReportPage({ id, run, busy }: Actions & { id: string }) {
             ))}
             <Button
               disabled={busy}
-              onClick={() => go("/projects/" + t.project.id)}
+              onClick={() => { sessionStorage.setItem("project:expand:" + t.project.id, "true"); go("/projects/" + t.project.id); }}
             >
               补充材料{t.kind === "DEEP" ? "并复测" : ""}
               <ArrowRight size={16} />

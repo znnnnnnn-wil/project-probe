@@ -194,6 +194,7 @@ export function ShopPage({ run, busy }: Actions) {
                   : "演示定价，不代表正式售价"}
               </p>
               <ul>
+                <li><Check size={17} />{product.lifetime ? "适合长期、多项目反复练习；建议先完成一次体验再选择" : "适合近期面试准备；快速、标准与复测共享次数"}</li>
                 <li>
                   <Check size={17} />
                   {product.lifetime
