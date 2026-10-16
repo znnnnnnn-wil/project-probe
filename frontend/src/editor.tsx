@@ -20,6 +20,7 @@ import type { Actions } from "./ui";
 import { useMounted } from "./use-read-scope";
 import { ProjectPractice } from "./project-practice";
 import "./editor.css";
+import { TrainingSelect } from "./training-select";
 
 const fields: [keyof Project, string, string][] = [
   ["name", "项目名称", "例如：校园自习室预约系统"],
@@ -510,13 +511,10 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
               </li>
             </ul>
             <div className="start-block">
-              <label>练习长度<select value={exerciseMode} onChange={e => setExerciseMode(e.target.value)} disabled={busy}>
-                <option value="QUICK">快速练习 · 2题</option><option value="STANDARD">标准深挖 · 5题（复测3题）</option>
-              </select></label>
-              <label>追问侧重<select value={difficulty} onChange={e => setDifficulty(e.target.value)} disabled={busy}>
-                <option value="BASIC">实习基础与职责</option><option value="IMPLEMENTATION">实现细节</option>
-                <option value="TRADEOFF">故障与方案取舍</option>
-              </select></label>
+              <TrainingSelect label="练习长度" value={exerciseMode} onChange={setExerciseMode} disabled={busy}
+                options={[{ value: "QUICK", label: "快速练习 · 2题" }, { value: "STANDARD", label: "标准深挖 · 5题（复测3题）" }]} />
+              <TrainingSelect label="追问侧重" value={difficulty} onChange={setDifficulty} disabled={busy}
+                options={[{ value: "BASIC", label: "实习基础与职责" }, { value: "IMPLEMENTATION", label: "实现细节" }, { value: "TRADEOFF", label: "故障与方案取舍" }]} />
               {(id === "new" || dirty || factsDirty || !p.factsConfirmed) && <p className="start-prerequisite">
                 <ShieldCheck size={15} />{id === "new" ? "先保存项目材料，再核对事实。" : dirty ? "保存材料修改后，重新核对项目事实。" : "完成事实核对并保存，即可开始深挖。"}
               </p>}
