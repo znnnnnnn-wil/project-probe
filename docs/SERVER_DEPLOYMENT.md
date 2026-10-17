@@ -1,4 +1,14 @@
-# 已有服务器的隔离部署准备
+# 服务器部署与恢复记录
+
+## 2026-10-17 普通用户流程更新
+
+固定应用提交 `88ea3943e50e81a6b52e29199abfd1a08a7df90e` 已发布至 https://39.96.27.134:18443，配置仍为live/sandbox、真实模型deepseek-v4.1-flash，语音和简历导入开关保留。运营工作台已撤回，运营权限为空。V1–V16全部成功。
+
+发布前完整数据库dump还原至一次性隔离库，21张既有表内容摘要逐表一致；未覆盖原库。旧订单与权益字段摘要不变，backend.env和Nginx配置摘要不变，LiveSync及本项目web容器均未重启。发布后备份service成功、timer启用。回滚备份位于 `/opt/project-probe-staging/releases/training-improvements-20261017T072559Z`，权限受保护，不随仓库交付。
+
+公网合成账号真实注册、一题AI问答及报告、草稿刷新、回答预览不写库/确认后版本递增、自愿反馈、账户恢复与注销通过；未创建订单、未消费训练包、未执行正式付款。四种屏宽×三体验状态无横向溢出和脚本错误。该流程使用合成材料，不能作为真实用户或商业化证据。
+
+证据为 `.runtime/public-release-88ea394/deployment.json`、`public-result.json` 和 `.runtime/user-flow-layout/public-result.json`。以下保留历次发布记录；旧记录中的待办按其记录日期理解。
 
 ## 2026-10-15 支付交互前端更新
 
