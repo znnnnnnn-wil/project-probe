@@ -162,10 +162,11 @@ function App() {
                 aria-label="退出登录"
                 onClick={() =>
                   run(async () => {
+                    const version = navigationVersion.current;
                     await api("/auth/logout", "POST");
                     sessionStorage.clear();
                     setUser(null);
-                    go("/");
+                    if (version === navigationVersion.current) go("/");
                   })
                 }
               >

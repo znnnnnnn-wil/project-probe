@@ -4,7 +4,7 @@ import { injectSpeechPCM } from "../../scripts/vad-test-audio.mjs";
 
 test.use({
   launchOptions: {
-    channel: "msedge",
+    channel: process.platform === "win32" ? "msedge" : undefined,
     args: [
       "--use-fake-device-for-media-stream",
       "--use-fake-ui-for-media-stream",
@@ -295,13 +295,12 @@ test("VAD加载期间离开页面不会继续录音或上传", async ({ page, co
   await page.getByRole("button", { name: "开始录音", exact: true }).click();
   await started;
   await page.getByRole("link", { name: "我的项目", exact: true }).click();
-  expect(
-    await page.evaluate(() =>
+  await expect(page.getByRole("heading", { name: "我的项目", exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
       (window as unknown as { testMicStream: MediaStream }).testMicStream
         .getTracks()
         .every((track) => track.readyState === "ended"),
-    ),
-  ).toBeTruthy();
+    )).toBeTruthy();
   releaseModel!();
   await page.waitForTimeout(800);
   expect(uploads).toBe(0);

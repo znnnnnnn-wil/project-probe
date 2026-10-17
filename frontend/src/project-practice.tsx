@@ -39,7 +39,7 @@ export function ProjectPractice({ projectId, disabled, onSaved, onReview, run, b
           {value.modelMode && <small>{value.modelMode === "demo" ? "规则演示，非AI评估" : "真实AI反馈，技术建议仍需核对"}</small>}
         </div>
         {!value.report && <div className="practice-answer"><label>体验回答
-          <textarea rows={6} maxLength={3000} disabled={busy || disabled || waiting || loadError || submitted} value={answer} onChange={e => edit(e.target.value)} placeholder="从你的职责、具体实现和验证方式说起…" />
+          <textarea aria-label="体验回答" rows={6} maxLength={3000} disabled={busy || disabled || waiting || loadError || submitted} value={answer} onChange={e => edit(e.target.value)} placeholder="从你的职责、具体实现和验证方式说起…" />
         </label><div className="practice-answer-actions"><small>{answer.length} / 3000</small>{action}</div></div>}
       </div>}
       {value.report && <div className="practice-feedback"><h3>针对你的回答</h3>
