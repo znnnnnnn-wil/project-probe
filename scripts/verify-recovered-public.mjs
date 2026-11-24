@@ -38,9 +38,8 @@ try {
       const registration = await context.request.post(base + "/api/auth/register", { headers: { Origin: base }, data: { username: "reset-synthetic-" + randomUUID(), password: randomUUID() + randomUUID() } });
       assert(registration.ok(), "新合成账号注册失败");
       const shop = await (await context.request.get(base + "/api/shop")).json();
-      const ten = shop.products.find(item => item.code === "TEN_TRAININGS");
-      const lifetime = shop.products.find(item => item.code === "LIFETIME");
-      assert(ten.amountCents === 990 && ten.trainingLimit === 10 && lifetime.amountCents === 999900 && lifetime.lifetime, "套餐定价不匹配");
+      const [ten] = shop.products;
+      assert(shop.products.length === 1 && ten.code === "TEN_TRAININGS" && ten.amountCents === 90 && ten.trainingLimit === 10 && !ten.lifetime, "套餐定价不匹配");
       assert(!shop.operationsEnabled && !shop.orders.length && !shop.packages.length, "合成账号不应存在已付权益或开放现金操作");
       const page = await context.newPage();
       const errors = [];

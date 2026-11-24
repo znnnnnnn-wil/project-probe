@@ -53,7 +53,7 @@ if (!(await exists(profile)))
     [
       "# 接入草稿：只含路径和待填字段，不自动应用到运行配置。",
       "PAYMENT_MODE=" + mode,
-      "TRAINING_PRICE_CENTS=990",
+      "TRAINING_PRICE_CENTS=90",
       "PAYMENT_RECONCILE_ENABLED=true",
       `${prefix}_APP_ID=`,
       `${prefix}_SELLER_ID=`,

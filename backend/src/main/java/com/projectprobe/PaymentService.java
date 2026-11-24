@@ -142,11 +142,6 @@ public class PaymentService {
       String productCode = input.containsKey("productCode")
         ? required(input, "productCode", 30)
         : "TEN_TRAININGS";
-      var product = products()
-        .stream()
-        .filter(p -> productCode.equals(p.get("code")))
-        .findFirst()
-        .orElseThrow(() -> error(400, "套餐不存在，请刷新后重新选择"));
       var rows = s.db.queryForList(
         "SELECT * FROM purchase_orders WHERE user_id=? AND request_key=?",
         user,
@@ -160,6 +155,11 @@ public class PaymentService {
         );
         return order(user, str(rows.get(0), "id"));
       }
+      var product = products()
+        .stream()
+        .filter(p -> productCode.equals(p.get("code")))
+        .findFirst()
+        .orElseThrow(() -> error(400, "套餐不存在，请刷新后重新选择"));
       String id = id(),
         merchantNo = mode.toUpperCase(Locale.ROOT) + "_" + id.replace("-", "");
       var a = settings.active();
@@ -260,20 +260,6 @@ public class PaymentService {
         false,
         "description",
         "深挖与关联复测共用 10 次，无时间限制"
-      ),
-      Map.of(
-        "code",
-        "LIFETIME",
-        "name",
-        "永久训练套餐",
-        "amountCents",
-        999900,
-        "trainingLimit",
-        0,
-        "lifetime",
-        true,
-        "description",
-        "永久不限训练次数，无自动续费"
       )
     );
   }

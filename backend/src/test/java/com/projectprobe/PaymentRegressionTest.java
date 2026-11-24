@@ -84,6 +84,41 @@ class PaymentRegressionTest {
   }
 
   @Test
+  void currentCatalogOffersOnlyTenTrainingsForNinetyCents() {
+    var settings = new PaymentSettings();
+    settings.setMode("mock");
+    var pay = new PaymentService(s, settings);
+    String user = user();
+    assertEquals(List.of("TEN_TRAININGS"), pay.products().stream().map(p -> p.get("code")).toList());
+    assertEquals(90, pay.products().get(0).get("amountCents"));
+    var order = pay.create(user, Map.of("requestKey", id(), "amountCents", 1));
+    assertEquals(90, order.get("amount_cents"));
+    assertEquals(10, order.get("training_limit"));
+    assertEquals(400, assertThrows(ResponseStatusException.class,
+      () -> pay.create(user, Map.of("requestKey", id(), "productCode", "LIFETIME"))).getStatusCode().value());
+  }
+
+  @Test
+  void catalogChangeKeepsExistingOrderSnapshotsAndLifetimeRights() {
+    String user = user();
+    var oldPay = new PaymentService(s, config("mock"));
+    String tenKey = id();
+    var ten = oldPay.create(user, Map.of("requestKey", tenKey));
+    String lifetimeKey = id();
+    var lifetime = oldPay.create(user, Map.of("requestKey", lifetimeKey));
+    s.db.update("UPDATE purchase_orders SET product_code='LIFETIME', amount_cents=999900, training_limit=0, lifetime=TRUE WHERE id=?", lifetime.get("id"));
+    oldPay.mock(user, str(lifetime, "id"));
+
+    var settings = new PaymentSettings();
+    settings.setMode("mock");
+    var pay = new PaymentService(s, settings);
+    assertEquals(990, pay.create(user, Map.of("requestKey", tenKey)).get("amount_cents"));
+    assertEquals(999900, pay.create(user, Map.of("requestKey", lifetimeKey, "productCode", "LIFETIME")).get("amount_cents"));
+    assertEquals(true, pay.quota(pay.packages(user)).get("unlimited"));
+    assertEquals(ten.get("id"), pay.order(user, str(ten, "id")).get("id"));
+  }
+
+  @Test
   void previousMockOrdersStillReserveAndReturnTrainingQuotaTransactionally() {
     String user = user();
     var pay = new PaymentService(s, config("mock"));
@@ -160,6 +195,7 @@ class PaymentRegressionTest {
   PaymentSettings config(String mode) {
     var c = new PaymentSettings();
     c.setMode(mode);
+    c.setPriceCents(990); // Historical orders exercise the old price in gateway and signature fixtures.
     var a = c.active();
     a.setAppId(mode + "-app");
     a.setSellerId(mode + "-seller");

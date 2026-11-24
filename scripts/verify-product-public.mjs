@@ -25,10 +25,8 @@ try {
     const shopResponse = await api.request.get(base + "/api/shop");
     if (!shopResponse.ok()) throw new Error("线上商品接口读取失败");
     catalog = await shopResponse.json();
-    const ten = catalog.products?.find(p => p.code === "TEN_TRAININGS");
-    const permanent = catalog.products?.find(p => p.code === "LIFETIME");
-    if (ten?.amountCents !== 990 || ten.trainingLimit !== 10 || ten.lifetime ||
-        permanent?.amountCents !== 999900 || !permanent.lifetime || permanent.trainingLimit !== 0)
+    const [ten] = catalog.products ?? [];
+    if (catalog.products?.length !== 1 || ten.code !== "TEN_TRAININGS" || ten.amountCents !== 90 || ten.trainingLimit !== 10 || ten.lifetime)
       throw new Error("线上套餐价格或权益错误");
     if (catalog.operationsEnabled || catalog.orders.length || catalog.packages.length) throw new Error("合成验收账户初始状态错误");
     await api.request.post(base + "/api/auth/logout", { headers: { Origin: base } });
@@ -85,8 +83,8 @@ try {
       if (name === "report") await page.locator(".plan-details summary").first().click();
       if (name === "shop") {
         const prices = await page.locator(".product-list .price").allTextContents();
-        if (prices.length !== 2 || !prices[0].includes("9.90") || !prices[1].includes("9,999.00") || prices[1].includes("999,999.00"))
-          throw new Error("永久套餐价格页面显示错误");
+        if (prices.length !== 1 || !prices[0].includes("0.90"))
+          throw new Error("训练套餐价格页面显示错误");
       }
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error(name + " 横向溢出");
       await page.screenshot({ path: path.join(output, name + "-" + viewport.width + ".png"), fullPage: true });

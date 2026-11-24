@@ -24,6 +24,7 @@ for (const mode of ["sandbox", "production"]) {
   const env = { ...process.env };
   for (const key of Object.keys(env))
     if (key.startsWith("ALIPAY_")) delete env[key];
+  delete env.TRAINING_PRICE_CENTS;
   Object.assign(env, {
     PAYMENT_MODE: mode,
     MODEL_MODE: "demo",
@@ -87,7 +88,7 @@ for (const mode of ["sandbox", "production"]) {
     const o = await (
       await api("/orders", "POST", { requestKey: randomUUID(), amountCents: 1 })
     ).json();
-    assert.equal(o.amount_cents, 990);
+    assert.equal(o.amount_cents, 90);
     assert.equal((await api(`/orders/${o.id}/checkout`, "POST")).status, 503);
     assert.equal((await api(`/orders/${o.id}/sync`, "POST")).status, 503);
     assert.equal((await api(`/orders/${o.id}/mock-pay`, "POST")).status, 404);

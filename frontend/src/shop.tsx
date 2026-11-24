@@ -115,7 +115,7 @@ export function ShopPage({ run, busy }: Actions) {
       <PageHead
         eyebrow="支付宝 AI 网页应用收款"
         title="训练包与订单"
-        text="次数套餐与永久套餐，无自动续费。普通中断可继续原训练；系统生成失败可恢复或返还本次训练次数。"
+        text="10 次训练，无自动续费。普通中断可继续原训练；系统生成失败可恢复或返还本次训练次数。"
       />
       {checkout.notice && (
         <div className="purchase-context" role="status">
@@ -179,7 +179,7 @@ export function ShopPage({ run, busy }: Actions) {
                 lifetime: false,
               },
             ]
-          ).map((product) => (
+          ).filter((product) => !product.lifetime).map((product) => (
             <article className="package-card" key={product.code}>
               <span className="badge">{paymentLabel[s.mode]}商品</span>
               <h2>{product.name}</h2>
@@ -197,18 +197,14 @@ export function ShopPage({ run, busy }: Actions) {
                   : "演示定价，不代表正式售价"}
               </p>
               <ul>
-                <li><Check size={17} />{product.lifetime ? "适合长期、多项目反复练习；建议先完成一次体验再选择" : "适合近期面试准备；快速、标准与复测共享次数"}</li>
+                <li><Check size={17} />适合近期面试准备；快速、标准与复测共享次数</li>
                 <li>
                   <Check size={17} />
-                  {product.lifetime
-                    ? "永久不限训练次数"
-                    : "深挖与复测合计 10 次"}
+                  深挖与复测合计 {product.trainingLimit} 次
                 </li>
                 <li>
                   <Check size={17} />
-                  {product.lifetime
-                    ? "不限深挖与关联复测次数"
-                    : "每开启一轮训练扣 1 次"}
+                  每开启一轮训练扣 1 次
                 </li>
                 <li>
                   <Check size={17} />
@@ -222,13 +218,6 @@ export function ShopPage({ run, busy }: Actions) {
               <Button
                 disabled={busy || !!checkout.pendingId}
                 onClick={() => {
-                  if (
-                    product.lifetime &&
-                    !window.confirm(
-                      `确认创建永久套餐订单？金额为 ¥${(product.amountCents / 100).toLocaleString("zh-CN")}；${s.mode === "production" ? "付款将产生真实扣款。" : "当前为测试环境，不使用真实资金。"}`,
-                    )
-                  )
-                    return;
                   const popup =
                     s.mode !== "mock" && s.configured
                       ? openPaymentWindow()
@@ -258,7 +247,7 @@ export function ShopPage({ run, busy }: Actions) {
                   });
                 }}
               >
-                {product.lifetime ? "创建永久套餐" : "创建"}
+                创建
                 {s.mode === "mock"
                   ? "模拟"
                   : s.mode === "sandbox"

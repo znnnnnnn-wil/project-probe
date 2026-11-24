@@ -17,7 +17,7 @@ public class PaymentSettings {
   public static final String PRODUCTION_GATEWAY =
     "https://openapi.alipay.com/gateway.do";
   private String mode = "disabled";
-  private int priceCents = 990;
+  private int priceCents = 90;
   private Account sandbox = new Account(),
     production = new Account();
   private boolean reconcileEnabled;

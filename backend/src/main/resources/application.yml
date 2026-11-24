@@ -60,7 +60,7 @@ app:
   payment-mode: ${PAYMENT_MODE:disabled}
   payment:
     mode: ${PAYMENT_MODE:disabled}
-    price-cents: ${TRAINING_PRICE_CENTS:990}
+    price-cents: ${TRAINING_PRICE_CENTS:90}
     order-ttl-minutes: ${ORDER_TTL_MINUTES:30}
     expiry-sync-enabled: ${PAYMENT_EXPIRY_SYNC_ENABLED:false}
     reconcile-enabled: ${PAYMENT_RECONCILE_ENABLED:false}
