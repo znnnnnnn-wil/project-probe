@@ -115,7 +115,7 @@ export function ShopPage({ run, busy }: Actions) {
       <PageHead
         eyebrow="支付宝 AI 网页应用收款"
         title="训练包与订单"
-        text="10 次训练，无自动续费。普通中断可继续原训练；系统生成失败可恢复或返还本次训练次数。"
+        text="套餐一次性购买。可在项目档案发起深挖，在复盘报告里发起专项复测。"
       />
       {checkout.notice && (
         <div className="purchase-context" role="status">
@@ -197,22 +197,21 @@ export function ShopPage({ run, busy }: Actions) {
                   : "演示定价，不代表正式售价"}
               </p>
               <ul>
-                <li><Check size={17} />适合近期面试准备；快速、标准与复测共享次数</li>
                 <li>
-                  <Check size={17} />
-                  深挖与复测合计 {product.trainingLimit} 次
+                  <Check size={17} aria-hidden="true" />
+                  项目深挖和专项复测共用 {product.trainingLimit} 次，每新开一轮使用 1 次。
                 </li>
                 <li>
-                  <Check size={17} />
-                  每开启一轮训练扣 1 次
+                  <Check size={17} aria-hidden="true" />
+                  深挖围绕你的项目连续追问，练习讲清个人职责、关键实现和验证过程。
                 </li>
                 <li>
-                  <Check size={17} />
-                  原回答、材料依据与补充任务
+                  <Check size={17} aria-hidden="true" />
+                  复测从报告里选一个待补充的问题，换个场景再练一轮。
                 </li>
                 <li>
-                  <Check size={17} />
-                  已提交记录持久保存与恢复
+                  <Check size={17} aria-hidden="true" />
+                  可继续未完成的训练。完成后可回看原回答、材料依据和补充建议。
                 </li>
               </ul>
               <Button

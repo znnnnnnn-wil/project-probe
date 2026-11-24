@@ -140,6 +140,8 @@ test("访客可以从首页进入训练包，登录后完成模拟购买", async
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page).toHaveURL(/#\/shop$/);
   await expect(page.locator(".product-list .price")).toHaveText(/0\.90/);
+  await expect(page.locator(".package-card")).toContainText("项目深挖和专项复测共用 10 次，每新开一轮使用 1 次。");
+  await expect(page.locator(".package-card")).toContainText("原回答、材料依据和补充建议");
   await expect(page.getByRole("heading", { name: "永久训练套餐", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "创建模拟订单" }).click();
   await page.getByRole("button", { name: "模拟支付成功" }).click();

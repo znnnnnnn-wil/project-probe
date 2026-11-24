@@ -28,12 +28,13 @@
 }
 .shop-page .package-card li {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   margin: 8px 0;
 }
 .shop-page .package-card li svg {
   flex: none;
+  margin-top: 0.2em;
   color: var(--blue);
 }
 .shop-page .package-card > small {
