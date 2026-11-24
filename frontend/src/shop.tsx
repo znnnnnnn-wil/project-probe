@@ -6,6 +6,8 @@ import {
   Check,
   X,
   CreditCard,
+  ReceiptText,
+  Wallet,
 } from "lucide-react";
 import { api, go } from "./api";
 import type { Shop, Order } from "./types";
@@ -77,6 +79,9 @@ export function ShopPage({ run, busy }: Actions) {
         ?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, [createdId, s?.orders.length]);
   if (!s) return <Loading />;
+  const quota = trainingQuota(s);
+  const legacyRemaining =
+    quota.legacyDeepRemaining + quota.legacyRetestRemaining;
   const pay = (id: string) => {
     const popup = s.mode === "mock" ? null : openPaymentWindow();
     run(async () => {
@@ -111,11 +116,10 @@ export function ShopPage({ run, busy }: Actions) {
   };
   return (
     <section className="page shop-page">
-      <PageHead
-        eyebrow="支付宝 AI 网页应用收款"
-        title="训练包与订单"
-        text="套餐一次性购买。可在项目档案发起深挖，在复盘报告里发起专项复测。"
-      />
+      <div className="shop-heading">
+        <h1>训练包与订单</h1>
+        <p>在项目档案开始深挖，从复盘报告发起专项复测。</p>
+      </div>
       {checkout.notice && (
         <div className="purchase-context" role="status">
           <CreditCard size={18} />
@@ -178,197 +182,203 @@ export function ShopPage({ run, busy }: Actions) {
                 lifetime: false,
               },
             ]
-          ).filter((product) => !product.lifetime).map((product) => (
-            <article className="package-card" key={product.code}>
-              <span className="badge">{paymentLabel[s.mode]}商品</span>
-              <h2>{product.name}</h2>
-              <div className="price">
-                <small>¥</small>
-                {(product.amountCents / 100).toLocaleString("zh-CN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
-                <span> / 包</span>
-              </div>
-              <p>
-                {s.mode === "production"
-                  ? "正式商品价格，以创建订单时金额为准"
-                  : "演示定价，不代表正式售价"}
-              </p>
-              <ul>
-                <li>
-                  <Check size={17} aria-hidden="true" />
-                  项目深挖和专项复测共用 {product.trainingLimit} 次，每新开一轮使用 1 次。
-                </li>
-                <li>
-                  <Check size={17} aria-hidden="true" />
-                  深挖围绕你的项目连续追问，练习讲清个人职责、关键实现和验证过程。
-                </li>
-                <li>
-                  <Check size={17} aria-hidden="true" />
-                  复测从报告里选一个待补充的问题，换个场景再练一轮。
-                </li>
-                <li>
-                  <Check size={17} aria-hidden="true" />
-                  可继续未完成的训练。完成后可回看原回答、材料依据和补充建议。
-                </li>
-              </ul>
-              <Button
-                disabled={busy || !!checkout.pendingId}
-                onClick={() => {
-                  const popup =
-                    s.mode !== "mock" && s.configured
-                      ? openPaymentWindow()
-                      : null;
-                  run(async () => {
-                    try {
-                      const order = await api<Order>("/orders", "POST", {
-                        requestKey: key,
-                        productCode: product.code,
-                      });
-                      if (originPath)
-                        sessionStorage.setItem(
-                          "purchase:order:" + order.id,
-                          originPath,
-                        );
-                      setKey(crypto.randomUUID());
-                      await load();
-                      setCreatedId(order.id);
-                      if (s.mode !== "mock" && s.configured)
-                        await checkout.checkout(order.id, popup);
-                    } catch (error) {
-                      try {
-                        popup?.close();
-                      } catch {}
-                      throw error;
-                    }
-                  });
-                }}
-              >
-                创建
-                {s.mode === "mock"
-                  ? "模拟"
-                  : s.mode === "sandbox"
-                    ? "沙箱"
-                    : "正式"}
-                订单 <ArrowRight size={17} />
-              </Button>
-              {createdId &&
-                s.orders.some(
-                  (o) =>
-                    o.id === createdId &&
-                    (o.product_code || "TEN_TRAININGS") === product.code,
-                ) && (
-                  <p className="save-notice" role="status">
-                    {s.mode === "mock"
-                      ? "订单已创建，前往右侧订单完成模拟付款。"
-                      : "订单已创建，收银台未打开时可从订单记录重试付款。"}
-                  </p>
-                )}
-              <small>
-                {s.mode === "mock"
-                  ? "不会调用支付宝，不会产生真实扣款。"
-                  : s.configured
-                    ? s.mode === "production"
-                      ? "通过支付宝正式收款，付款将产生真实扣款。"
-                      : "仅使用支付宝官方沙箱，不使用真实资金。"
-                    : "支付宝配置未完成，支付暂不可用，不会回退模拟支付。"}
-              </small>
-              {!s.configured && (
-                <div role="status">
-                  <p>仍需配置：</p>
-                  {s.configurationIssues?.map((v) => (
-                    <p key={v}>{v}</p>
-                  ))}
+          )
+            .filter((product) => !product.lifetime)
+            .map((product) => (
+              <article className="package-card" key={product.code}>
+                <div className="package-heading">
+                  <div>
+                    <h2>{product.name}</h2>
+                    <p>一次性购买</p>
+                  </div>
+                  <div className="price">
+                    <small>¥</small>
+                    {(product.amountCents / 100).toLocaleString("zh-CN", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                    <span> / 包</span>
+                  </div>
                 </div>
-              )}
-            </article>
-          ))}
+                <ul>
+                  <li>
+                    <Check size={17} aria-hidden="true" />
+                    项目深挖和专项复测共用 {product.trainingLimit}{" "}
+                    次，每新开一轮使用 1 次。
+                  </li>
+                  <li>
+                    <Check size={17} aria-hidden="true" />
+                    深挖围绕你的项目连续追问，练习讲清个人职责、关键实现和验证过程。
+                  </li>
+                  <li>
+                    <Check size={17} aria-hidden="true" />
+                    复测从报告里选一个待补充的问题，换个场景再练一轮。
+                  </li>
+                  <li>
+                    <Check size={17} aria-hidden="true" />
+                    可继续未完成的训练。完成后可回看原回答、材料依据和补充建议。
+                  </li>
+                </ul>
+                <div className="package-checkout">
+                  <Button
+                    disabled={busy || !!checkout.pendingId}
+                    onClick={() => {
+                      const popup =
+                        s.mode !== "mock" && s.configured
+                          ? openPaymentWindow()
+                          : null;
+                      run(async () => {
+                        try {
+                          const order = await api<Order>("/orders", "POST", {
+                            requestKey: key,
+                            productCode: product.code,
+                          });
+                          if (originPath)
+                            sessionStorage.setItem(
+                              "purchase:order:" + order.id,
+                              originPath,
+                            );
+                          setKey(crypto.randomUUID());
+                          await load();
+                          setCreatedId(order.id);
+                          if (s.mode !== "mock" && s.configured)
+                            await checkout.checkout(order.id, popup);
+                        } catch (error) {
+                          try {
+                            popup?.close();
+                          } catch {}
+                          throw error;
+                        }
+                      });
+                    }}
+                  >
+                    创建
+                    {s.mode === "mock"
+                      ? "模拟"
+                      : s.mode === "sandbox"
+                        ? "沙箱"
+                        : "正式"}
+                    订单 <ArrowRight size={17} />
+                  </Button>
+                  {createdId &&
+                    s.orders.some(
+                      (o) =>
+                        o.id === createdId &&
+                        (o.product_code || "TEN_TRAININGS") === product.code,
+                    ) && (
+                      <p className="save-notice" role="status">
+                        {s.mode === "mock"
+                          ? "订单已创建，可在订单记录里完成模拟付款。"
+                          : "订单已创建，收银台未打开时可从订单记录重试付款。"}
+                      </p>
+                    )}
+                  <small>
+                    {s.mode === "mock"
+                      ? "不会调用支付宝，不会产生真实扣款。"
+                      : s.configured
+                        ? s.mode === "production"
+                          ? "通过支付宝正式收款，付款将产生真实扣款。"
+                          : "仅使用支付宝官方沙箱，不使用真实资金。"
+                        : "支付宝配置未完成，支付暂不可用，不会回退模拟支付。"}
+                  </small>
+                </div>
+                {!s.configured && (
+                  <div role="status">
+                    <p>仍需配置：</p>
+                    {s.configurationIssues?.map((v) => (
+                      <p key={v}>{v}</p>
+                    ))}
+                  </div>
+                )}
+              </article>
+            ))}
         </div>
-        <div>
-          <div className="panel balance">
+        <section className="panel balance">
+          <div className="balance-heading">
+            <span className="balance-icon">
+              <Wallet size={19} aria-hidden="true" />
+            </span>
             <h2>我的训练权益</h2>
-            <div>
-              <p>
-                <strong>
-                  {trainingQuota(s).unlimited
-                    ? "不限次数"
-                    : trainingQuota(s).sharedRemaining}
-                </strong>
-                {trainingQuota(s).unlimited
-                  ? "永久训练权益"
-                  : "深挖与复测共用次数"}
-              </p>
-              <p>
-                <strong>
-                  {trainingQuota(s).legacyDeepRemaining +
-                    trainingQuota(s).legacyRetestRemaining}
-                </strong>
-                历史套餐剩余次数
-              </p>
-            </div>
-            <small>
-              复测需先完成本项目深挖，并从报告进入。历史套餐保留原有绑定规则。
-            </small>
+          </div>
+          <div className="balance-summary">
+            <p className="balance-count">
+              <strong>
+                {quota.unlimited ? "不限次数" : quota.sharedRemaining}
+              </strong>
+              {!quota.unlimited && <span>次</span>}
+            </p>
+            <p>
+              {quota.unlimited ? "永久训练权益" : "深挖与复测共用的剩余次数"}
+            </p>
+          </div>
+          {legacyRemaining > 0 && (
+            <p className="balance-legacy">
+              历史套餐剩余 {legacyRemaining} 次，按原训练绑定使用。
+            </p>
+          )}
+          <div className="balance-footer">
             <a
-              href={
-                originPath ? "#" + originPath : "#/projects"
-              }
+              className="button secondary"
+              href={originPath ? "#" + originPath : "#/projects"}
             >
-              {originPath ? "返回原页面" : "前往我的项目"}{" "}
-              <ArrowRight size={15} />
+              {originPath ? "返回原页面" : "前往我的项目"}
+              <ArrowRight size={15} aria-hidden="true" />
             </a>
           </div>
-          <div className="panel orders">
-            <div className="panel-heading">
-              <h2>订单记录</h2>
-              <button
-                className="text-link"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await load();
-                  })
-                }
-              >
-                <RefreshCw size={14} />
-                刷新
-              </button>
+        </section>
+        <section className="panel orders">
+          <div className="panel-heading">
+            <h2>订单记录</h2>
+            <button
+              className="text-link"
+              disabled={busy}
+              onClick={() =>
+                run(async () => {
+                  await load();
+                })
+              }
+            >
+              <RefreshCw size={14} />
+              刷新
+            </button>
+          </div>
+          {!s.orders.length ? (
+            <div className="orders-empty">
+              <ReceiptText size={18} aria-hidden="true" />
+              <p>暂无订单</p>
             </div>
-            {!s.orders.length ? (
-              <p className="mini-empty">暂无订单。创建订单后可查看支付状态。</p>
-            ) : (
-              s.orders.map((o) => (
-                <div
-                  className={"order " + (createdId === o.id ? "new-order" : "")}
-                  id={"order-" + o.id}
-                  key={o.id}
-                >
-                  <div>
-                    <span className="badge">
-                      {paymentLabel[o.mode] || "未知环境"}
-                      {o.can_operate === false ? " · 历史账号订单" : ""}
-                    </span>
-                    <h3>
-                      {o.product_name || "项目深挖训练包"}{" "}
-                      <span>¥{(o.amount_cents / 100).toFixed(2)}</span>
-                    </h3>
-                    <details className="order-number">
-                      <summary>订单编号</summary>
-                      <small>{o.id}</small>
-                    </details>
-                    <p>
-                      {new Date(o.created_at).toLocaleString("zh-CN")} ·{" "}
-                      {orderLabel(o)}
-                    </p>
-                    {o.query_error && <small>{o.query_error}</small>}
-                    {o.status === "PENDING" && o.expires_at && (
-                      <small>
-                        付款截止{" "}
-                        {new Date(o.expires_at).toLocaleString("zh-CN")}
-                      </small>
-                    )}
-                  </div>
+          ) : (
+            s.orders.map((o) => (
+              <div
+                className={"order " + (createdId === o.id ? "new-order" : "")}
+                id={"order-" + o.id}
+                key={o.id}
+              >
+                <div>
+                  <span className="badge">
+                    {paymentLabel[o.mode] || "未知环境"}
+                    {o.can_operate === false ? " · 历史账号订单" : ""}
+                  </span>
+                  <h3>
+                    {o.product_name || "项目深挖训练包"}{" "}
+                    <span>¥{(o.amount_cents / 100).toFixed(2)}</span>
+                  </h3>
+                  <details className="order-number">
+                    <summary>订单编号</summary>
+                    <small>{o.id}</small>
+                  </details>
+                  <p>
+                    {new Date(o.created_at).toLocaleString("zh-CN")} ·{" "}
+                    {orderLabel(o)}
+                  </p>
+                  {o.query_error && <small>{o.query_error}</small>}
+                  {o.status === "PENDING" && o.expires_at && (
+                    <small>
+                      付款截止 {new Date(o.expires_at).toLocaleString("zh-CN")}
+                    </small>
+                  )}
+                </div>
+                <div className="order-actions">
                   {(o.status === "PENDING" || o.status === "EXPIRED") &&
                     o.mode !== "mock" &&
                     o.mode === s.mode &&
@@ -454,10 +464,10 @@ export function ShopPage({ run, busy }: Actions) {
                       </div>
                     )}
                 </div>
-              ))
-            )}
-          </div>
-        </div>
+              </div>
+            ))
+          )}
+        </section>
       </div>
     </section>
   );
@@ -516,9 +526,7 @@ export function PaymentReturn({
     sessionStorage.removeItem("payment:waiting");
     forgetPurchaseOrigin();
     const timer = window.setTimeout(() => {
-      location.replace(
-        "/#" + (originPath ? originPath : "/shop"),
-      );
+      location.replace("/#" + (originPath ? originPath : "/shop"));
     }, 1500);
     return () => window.clearTimeout(timer);
   }, [order?.status, originPath]);
@@ -568,11 +576,7 @@ export function PaymentReturn({
                   : "1 次深挖 + 1 次关联复测已到账。"}
               现在可以继续准备项目。
             </p>
-            <Button
-              onClick={() =>
-                go(originPath ? originPath : "/projects")
-              }
-            >
+            <Button onClick={() => go(originPath ? originPath : "/projects")}>
               {originPath ? "返回原页面" : "前往我的项目"}
               <ArrowRight size={16} />
             </Button>
