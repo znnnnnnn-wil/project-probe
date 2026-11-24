@@ -9,7 +9,11 @@ export function Login({
   run,
   busy,
   onLogin,
-}: Actions & { onLogin: (u: { id: string; username: string }) => void }) {
+  continueToPurchase,
+}: Actions & {
+  onLogin: (u: { id: string; username: string }) => void;
+  continueToPurchase?: boolean;
+}) {
   const [register, setRegister] = useState(true);
   const [recover, setRecover] = useState(false);
   const [name, setName] = useState("");
@@ -47,7 +51,9 @@ export function Login({
           }}
         >
           <h2>{register ? "创建练习账号" : "欢迎回来"}</h2>
-          <p>登录后可以保存项目材料、练习面试和查看复盘。</p>
+          <p>{continueToPurchase
+            ? "登录或注册后继续购买训练包，训练次数将发放到当前账号。"
+            : "登录后可以保存项目材料、练习面试和查看复盘。"}</p>
           <label>
             用户名
             <input

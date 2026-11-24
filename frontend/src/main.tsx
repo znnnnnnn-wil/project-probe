@@ -181,7 +181,7 @@ function App() {
           <a className={nav === "history" ? "selected" : ""} aria-current={nav === "history" ? "page" : undefined} href="#/history">
             训练记录
           </a>
-          {user && paymentProvider !== "disabled" && (
+          {paymentProvider !== "disabled" && (
             <a className={nav === "shop" ? "selected" : ""} aria-current={nav === "shop" ? "page" : undefined} href="#/shop">
               {paymentProvider === "watcha" ? "训练包" : "训练包与订单"}
             </a>
@@ -249,6 +249,7 @@ function App() {
             ) : !ready ? <Loading /> : !user || path === "/login" ? (
               <Login
                 {...props}
+                continueToPurchase={nav === "shop" && paymentProvider !== "disabled"}
                 onLogin={(u) => {
                   syncSessionUser(u.id);
                   setUser(u);

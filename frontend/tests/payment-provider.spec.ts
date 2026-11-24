@@ -75,7 +75,7 @@ test("爱猹收返回后刷新次数，继续同一个训练请求", async ({ pa
   expect(requestKeys[0]).toBe(requestKeys[1]);
 });
 
-test("旧版支付页面可以继续模拟付款并显示订单交付", async ({ page }) => {
+test("访客可以从首页进入训练包，登录后完成模拟购买", async ({ page }) => {
   const order = {
     id: projectId,
     amount_cents: 990,
@@ -84,6 +84,9 @@ test("旧版支付页面可以继续模拟付款并显示订单交付", async ({
     created_at: Date.now(),
   };
   let created = false;
+  let signedIn = false;
+  let shopRequests = 0;
+  const buyer = { id: "buyer", username: "模拟买家" };
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/config")
@@ -96,8 +99,13 @@ test("旧版支付页面可以继续模拟付款并显示订单交付", async ({
         },
       });
     if (path === "/api/me")
-      return route.fulfill({ json: { id: "buyer", username: "模拟买家" } });
-    if (path === "/api/shop")
+      return signedIn ? route.fulfill({ json: buyer }) : route.fulfill({ status: 401 });
+    if (path === "/api/auth/login") {
+      signedIn = true;
+      return route.fulfill({ json: buyer });
+    }
+    if (path === "/api/shop") {
+      shopRequests++;
       return route.fulfill({
         json: {
           mode: "mock",
@@ -111,6 +119,7 @@ test("旧版支付页面可以继续模拟付款并显示订单交付", async ({
           },
         },
       });
+    }
     if (path === "/api/orders") {
       created = true;
       return route.fulfill({ json: order });
@@ -121,7 +130,15 @@ test("旧版支付页面可以继续模拟付款并显示订单交付", async ({
     }
     return route.fulfill({ status: 404 });
   });
-  await page.goto("/#/shop");
+  await page.goto("/#/");
+  await page.getByRole("link", { name: "训练包与订单", exact: true }).click();
+  await expect(page.getByText("登录或注册后继续购买训练包", { exact: false })).toBeVisible();
+  expect(shopRequests).toBe(0);
+  await page.getByRole("button", { name: "已有账号？去登录" }).click();
+  await page.getByLabel("用户名", { exact: true }).fill(buyer.username);
+  await page.getByLabel("密码", { exact: true }).fill("synthetic-test-password");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page).toHaveURL(/#\/shop$/);
   await page.getByRole("button", { name: "创建模拟订单" }).click();
   await page.getByRole("button", { name: "模拟支付成功" }).click();
   await expect(page.getByText(/已确认，权益已发放/)).toBeVisible();
