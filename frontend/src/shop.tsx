@@ -4,7 +4,6 @@ import {
   FolderOpen,
   RefreshCw,
   Check,
-  ShieldCheck,
   X,
   CreditCard,
 } from "lucide-react";
@@ -457,20 +456,6 @@ export function ShopPage({ run, busy }: Actions) {
                 </div>
               ))
             )}
-          </div>
-          <div className="delivery-note">
-            <ShieldCheck size={18} />
-            <div>
-              <h3>交付与恢复</h3>
-              <p>
-                付款由服务端确认后发放次数。离开练习可随时继续，生成失败可重试或返还本次训练次数。次数返还不等于资金退款。
-              </p>
-              <p>
-                {s.mode === "production"
-                  ? "付款使用真实资金。未使用训练包的资金退款以订单处理结果为准。"
-                  : "当前为测试环境，不使用真实资金，不计作真实付费用户。"}
-              </p>
-            </div>
           </div>
         </div>
       </div>

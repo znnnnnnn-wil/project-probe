@@ -80,8 +80,7 @@
   gap: 6px;
   align-items: center;
 }
-.purchase-context,
-.shop-page .delivery-note {
+.purchase-context {
   display: flex;
   align-items: flex-start;
   gap: 12px;
@@ -90,8 +89,7 @@
   border-radius: var(--r-md);
   margin: 0 0 16px;
 }
-.purchase-context > svg,
-.shop-page .delivery-note > svg {
+.purchase-context > svg {
   flex: none;
 }
 .purchase-context > div {
@@ -99,12 +97,6 @@
 }
 .purchase-context small {
   display: block;
-}
-.shop-page .delivery-note {
-  margin: 20px 0 0;
-}
-.shop-page .delivery-note :last-child {
-  margin-bottom: 0;
 }
 .payment-delivered {
   margin: 16px 0;
