@@ -17,6 +17,8 @@ public class Api {
   final TrainingSupport support;
   final AnswerDrafts drafts;
   final InterviewSpeech speech;
+  final PaymentService payments;
+  final WatchaPayment watcha;
 
   Api(
     Store s,
@@ -27,7 +29,9 @@ public class Api {
     InputService inputs,
     TrainingSupport support,
     AnswerDrafts drafts,
-    InterviewSpeech speech
+    InterviewSpeech speech,
+    PaymentService payments,
+    WatchaPayment watcha
   ) {
     this.s = s;
     this.auth = auth;
@@ -38,6 +42,8 @@ public class Api {
     this.support = support;
     this.drafts = drafts;
     this.speech = speech;
+    this.payments = payments;
+    this.watcha = watcha;
   }
 
   @GetMapping("/health")
@@ -49,29 +55,29 @@ public class Api {
   Object ready() {
     try { s.db.queryForObject("SELECT 1", Integer.class); }
     catch (Exception e) { throw Store.error(503, "数据库暂不可用，请稍后重试"); }
-    return Map.of("status", "ready", "modelMode", model.mode, "modelCapacity", model.capacity());
+    return Map.of("status", "ready", "modelMode", model.mode, "modelCapacity", model.capacity(),
+      "paymentMode", payments.mode, "paymentConfigured", paymentConfigured());
   }
 
   @GetMapping("/config")
   Object config() {
-    return Map.of(
-      "modelMode",
-      model.mode,
-      "modelQualityReviewEnabled",
-      model.mode.equals("live") && model.qualityReviewEnabled,
-      "modelEvidenceSpansRequired",
-      model.mode.equals("live") && model.evidenceSpansRequired,
-      "modelName",
-      model.mode.equals("live") ? model.model : "",
-      "speechEnabled",
-      inputs.speechReady(),
-      "realtimeSpeechEnabled",
-      inputs.realtimeSpeechReady(),
-      "ttsEnabled",
-      speech.ttsReady(),
-      "resumeImportEnabled",
-      model.mode.equals("live")
+    return Map.ofEntries(
+      Map.entry("paymentProvider", watcha.enabled() ? "watcha" : payments.trainingBillingEnabled() ? "legacy" : "disabled"),
+      Map.entry("paymentMode", payments.mode),
+      Map.entry("paymentConfigured", paymentConfigured()),
+      Map.entry("modelMode", model.mode),
+      Map.entry("modelQualityReviewEnabled", model.mode.equals("live") && model.qualityReviewEnabled),
+      Map.entry("modelEvidenceSpansRequired", model.mode.equals("live") && model.evidenceSpansRequired),
+      Map.entry("modelName", model.mode.equals("live") ? model.model : ""),
+      Map.entry("speechEnabled", inputs.speechReady()),
+      Map.entry("realtimeSpeechEnabled", inputs.realtimeSpeechReady()),
+      Map.entry("ttsEnabled", speech.ttsReady()),
+      Map.entry("resumeImportEnabled", model.mode.equals("live"))
     );
+  }
+
+  private boolean paymentConfigured() {
+    return watcha.enabled() ? watcha.configured() : payments.configured();
   }
 
   @PostMapping("/auth/register")
@@ -185,7 +191,7 @@ public class Api {
     @RequestParam(defaultValue = "") String project
   ) {
     if (project.length() > 36) throw Store.error(400, "项目筛选参数不正确");
-    return new TrainingCatalog(s).all(auth.user(r), summary, project);
+    return trainings.catalog().all(auth.user(r), summary, project);
   }
 
   @GetMapping("/trainings/{id}")
@@ -201,7 +207,7 @@ public class Api {
     @RequestParam(defaultValue = "") String key,
     @RequestParam(defaultValue = "") String project
   ) {
-    return new TrainingCatalog(s).page(
+    return trainings.catalog().page(
       auth.user(r),
       offset,
       limit,
@@ -212,12 +218,12 @@ public class Api {
 
   @GetMapping("/training-overview")
   Object trainingOverview(HttpServletRequest r) {
-    return new TrainingCatalog(s).overview(auth.user(r));
+    return trainings.catalog().overview(auth.user(r));
   }
 
   @GetMapping("/training-projects")
   Object trainingProjects(HttpServletRequest r) {
-    return new TrainingCatalog(s).choices(auth.user(r));
+    return trainings.catalog().choices(auth.user(r));
   }
 
   @PostMapping("/trainings")

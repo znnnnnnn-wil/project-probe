@@ -9,6 +9,10 @@ class UserData {
   final Store s; final AccountSecurity security; final ProjectService projects;
   UserData(Store s, AccountSecurity security, ProjectService projects) { this.s = s; this.security = security; this.projects = projects; }
   void idle(String user) {
+    int checkingPayment = s.db.queryForObject(
+      "SELECT COUNT(*) FROM trainings WHERE user_id=? AND status='PAYMENT_VERIFYING'", Integer.class, user
+    );
+    if (checkingPayment > 0) throw error(409, "仍有训练次数待核对，请打开对应训练重试后再清理");
     int active = s.db.queryForObject("SELECT COUNT(*) FROM trainings WHERE user_id=? AND status='GENERATING' AND lease_until>?", Integer.class, user, now());
     active += s.db.queryForObject("SELECT COUNT(*) FROM project_practice_rounds WHERE user_id=? AND lease_until>?", Integer.class, user, now());
     active += s.db.queryForObject("SELECT COUNT(*) FROM material_jobs WHERE user_id=? AND expires_at>?", Integer.class, user, now());

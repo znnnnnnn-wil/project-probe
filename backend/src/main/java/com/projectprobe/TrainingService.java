@@ -3,34 +3,62 @@ package com.projectprobe;
 import static com.projectprobe.Store.*;
 
 import java.util.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class TrainingService {
-  @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
+  @Autowired JourneyMetrics journey;
+
+  static final String PAYMENT_PENDING = "PAYMENT_PENDING";
+  static final String PAYMENT_VERIFYING = "PAYMENT_VERIFYING";
+  private static final long PAYMENT_LEASE_MS = 30000;
 
   final Store s;
   final ProjectService projects;
   final ModelService model;
   final TrainingHistory history;
+  final PaymentService legacyPayment;
+  final WatchaPayment watchaPayment;
 
   TrainingService(
     Store s,
     ProjectService projects,
     ModelService model
   ) {
+    this(s, projects, model, null, null);
+  }
+
+  TrainingService(Store s, ProjectService projects, ModelService model, PaymentService legacyPayment) {
+    this(s, projects, model, legacyPayment, null);
+  }
+
+  @Autowired
+  TrainingService(
+    Store s,
+    ProjectService projects,
+    ModelService model,
+    PaymentService legacyPayment,
+    WatchaPayment watchaPayment
+  ) {
     this.s = s;
     this.projects = projects;
     this.model = model;
-    this.history = new TrainingHistory(s);
+    this.history = new TrainingHistory(s, legacyPayment);
+    this.legacyPayment = legacyPayment;
+    this.watchaPayment = watchaPayment;
   }
 
   Map<String, Object> row(String user, String id) {
-    return s.one(
+    var training = s.one(
       "SELECT * FROM trainings WHERE id=? AND user_id=?",
       id,
       user
     );
+    String packageId = str(training, "package_id");
+    if (legacyBillingEnabled() && !packageId.isEmpty()) legacyPayment.requireTrainingScope(user, packageId);
+    return training;
   }
 
   Map<String, Object> get(String user, String id) {
@@ -53,8 +81,9 @@ public class TrainingService {
 
   Map<String, Object> retestEntry(String user, Map<String, Object> deep) {
     var children = s.db.queryForList(
-      "SELECT id,status FROM trainings WHERE user_id=? AND parent_id=? AND kind='RETEST' ORDER BY created_at DESC,id DESC",
-      user, deep.get("id")
+      "SELECT t.id,t.status" + history.scoped() +
+        " AND t.parent_id=? AND t.kind='RETEST' ORDER BY t.created_at DESC,t.id DESC",
+      history.queryArgs(user, deep.get("id"))
     );
     return retestEntry(children);
   }
@@ -77,7 +106,11 @@ public class TrainingService {
   }
 
   List<Map<String, Object>> all(String user, boolean summary) {
-    return new TrainingCatalog(s).all(user, summary);
+    return catalog().all(user, summary);
+  }
+
+  TrainingCatalog catalog() {
+    return new TrainingCatalog(s, history);
   }
 
   void update(String id, String status, Map<String, Object> body) {
@@ -146,6 +179,7 @@ public class TrainingService {
   Map<String, Object> start(String user, Map<String, Object> input) {
     history.backfill(user);
     var training = s.locked(user, () -> {
+      s.requireActiveAccount(user);
       String requestKey = required(input, "requestKey", 100);
       var existing = s.db.queryForList(
         "SELECT id FROM trainings WHERE user_id=? AND request_key=?",
@@ -159,6 +193,7 @@ public class TrainingService {
       String parent = str(input, "parentId"),
         kind = parent.isBlank() ? "DEEP" : "RETEST";
       Map<String, Object> parentBody = null;
+      String parentPackageId = "";
       if (kind.equals("RETEST")) {
         var p = row(user, parent);
         if (
@@ -172,6 +207,7 @@ public class TrainingService {
           ("COMPLETED".equals(entry.get("state")) && !Boolean.TRUE.equals(input.get("newRound")))
         ) return get(user, str(entry, "trainingId"));
         parentBody = s.decode(p.get("body"));
+        parentPackageId = str(p, "package_id");
       }
       String id = id();
       var body = new LinkedHashMap<String, Object>();
@@ -212,34 +248,111 @@ public class TrainingService {
         "operation",
         kind.equals("RETEST") ? "FIRST_QUESTION" : "FIRST_DEEP_QUESTION"
       );
+      String paymentScope = watchaBillingEnabled() ? watchaPayment.scope() : null;
+      if (watchaBillingEnabled() && (paymentScope == null || paymentScope.isBlank()))
+        throw error(503, "训练支付尚未配置，请稍后重试");
+      String packageId = legacyBillingEnabled()
+        ? legacyPayment.reserveTraining(user, kind, parentPackageId, id)
+        : null;
       s.db.update(
-        "INSERT INTO trainings(id,user_id,project_id,request_key,kind,parent_id,status,body,created_at,history_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO trainings(id,user_id,project_id,request_key,kind,parent_id,status,body,created_at,history_key,package_id,payment_scope) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         id,
         user,
         projectId,
         requestKey,
         kind,
         parent.isBlank() ? null : parent,
-        "PENDING",
+        paymentScope == null ? "PENDING" : PAYMENT_PENDING,
         s.encode(body),
         now(),
-        historyKey
+        historyKey,
+        packageId,
+        paymentScope
       );
-      if (journey != null) journey.record(user, kind.equals("RETEST") ? "RETEST_STARTED" : "TRAINING_STARTED", id);
+      if (paymentScope == null) recordStarted(user, kind, id);
       return get(user, id);
     });
+    String trainingId = str(training, "id");
+    if (awaitingPayment(str(training, "status"))) {
+      authorizePayment(user, trainingId);
+      training = get(user, trainingId);
+    }
     // 先持久化训练，再在事务外调用模型，失败保留可恢复入口。
     if ("PENDING".equals(training.get("status"))) {
       try {
-        return generate(user, str(training, "id"));
-      } catch (org.springframework.web.server.ResponseStatusException e) {
+        return generate(user, trainingId);
+      } catch (ResponseStatusException e) {
         if (
           e.getStatusCode().value() == 503 || e.getStatusCode().value() == 409
-        ) return get(user, str(training, "id"));
+        ) return get(user, trainingId);
         throw e;
       }
     }
     return training;
+  }
+
+  private boolean legacyBillingEnabled() {
+    return legacyPayment != null && legacyPayment.trainingBillingEnabled();
+  }
+
+  private boolean watchaBillingEnabled() {
+    return watchaPayment != null && watchaPayment.enabled();
+  }
+
+  private static boolean awaitingPayment(String status) {
+    return PAYMENT_PENDING.equals(status) || PAYMENT_VERIFYING.equals(status);
+  }
+
+  private void recordStarted(String user, String kind, String id) {
+    if (journey != null) journey.record(user, kind.equals("RETEST") ? "RETEST_STARTED" : "TRAINING_STARTED", id);
+  }
+
+  private void authorizePayment(String user, String trainingId) {
+    String token = id();
+    boolean claimed = s.locked(user, () -> {
+      s.requireActiveAccount(user);
+      var training = row(user, trainingId);
+      String status = str(training, "status");
+      if (!awaitingPayment(status)) return false;
+      if (!watchaBillingEnabled() || !Objects.equals(training.get("payment_scope"), watchaPayment.scope()))
+        throw error(503, "当前训练的支付配置不可用，请稍后重试");
+      if (((Number) training.get("lease_until")).longValue() > now())
+        throw error(409, "正在核对训练次数，请稍后重试");
+      s.db.update(
+        "UPDATE trainings SET status=?,generation_token=?,lease_until=? WHERE id=?",
+        PAYMENT_VERIFYING, token, now() + PAYMENT_LEASE_MS, trainingId
+      );
+      return true;
+    });
+    if (!claimed) return;
+
+    // 同一条训练的 ID 跨进程、网络超时和数据库提交失败保持不变。
+    try {
+      watchaPayment.consume(user, trainingId);
+    } catch (ResponseStatusException e) {
+      s.locked(user, () -> {
+        s.db.update(
+          "UPDATE trainings SET status=?,generation_token=NULL,lease_until=0 WHERE id=? AND generation_token=?",
+          e.getStatusCode().value() == 402 ? PAYMENT_PENDING : PAYMENT_VERIFYING, trainingId, token
+        );
+        return null;
+      });
+      throw e;
+    }
+    s.locked(user, () -> {
+      s.requireActiveAccount(user);
+      var training = row(user, trainingId);
+      if (!token.equals(training.get("generation_token"))) {
+        if (awaitingPayment(str(training, "status"))) throw error(409, "训练次数核对中，请稍后重试");
+        return null;
+      }
+      s.db.update(
+        "UPDATE trainings SET status='PENDING',generation_token=NULL,lease_until=0 WHERE id=?",
+        trainingId
+      );
+      recordStarted(user, str(training, "kind"), trainingId);
+      return null;
+    });
   }
 
   Map<String, Object> turn(String question, String topic) {
@@ -349,11 +462,13 @@ public class TrainingService {
   }
 
   Map<String, Object> generate(String user, String id) {
+    if (awaitingPayment(str(row(user, id), "status"))) authorizePayment(user, id);
     history.backfill(user);
     String token = id();
     var claim = s.locked(user, () -> {
       var r = row(user, id);
       String status = str(r, "status");
+      if (awaitingPayment(status)) throw error(409, "请先完成训练次数核对");
       if (
         Set.of("ACTIVE", "COMPLETED", "REFUNDED").contains(status)
       ) return null;
@@ -489,6 +604,23 @@ public class TrainingService {
       if (e instanceof ModelContext.TooLarge limit) throw limit;
       throw error(503, "生成失败，进度已保存，请重试。");
     }
+  }
+
+  Map<String, Object> refund(String user, String id) {
+    if (!legacyBillingEnabled()) throw error(404, "该训练不支持返还旧套餐次数");
+    return s.locked(user, () -> {
+      s.requireActiveAccount(user);
+      var training = row(user, id);
+      String status = str(training, "status");
+      if ("REFUNDED".equals(status)) return get(user, id);
+      String packageId = str(training, "package_id");
+      boolean expired = "GENERATING".equals(status) && ((Number) training.get("lease_until")).longValue() <= now();
+      if (packageId.isBlank() || (!Set.of("PENDING", "FAILED").contains(status) && !expired))
+        throw error(409, "当前训练不能返还旧套餐次数");
+      legacyPayment.releaseTraining(user, str(training, "kind"), packageId, id);
+      s.db.update("UPDATE trainings SET status='REFUNDED',generation_token=NULL,lease_until=0 WHERE id=?", id);
+      return get(user, id);
+    });
   }
 
 }

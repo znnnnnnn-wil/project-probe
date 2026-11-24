@@ -57,3 +57,35 @@ app:
   tts-voice: ${TTS_VOICE:longcheng_v2}
   tts-url: ${TTS_BASE_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
   tts-key: ${TTS_API_KEY:}
+  payment-mode: ${PAYMENT_MODE:disabled}
+  payment:
+    mode: ${PAYMENT_MODE:disabled}
+    price-cents: ${TRAINING_PRICE_CENTS:990}
+    order-ttl-minutes: ${ORDER_TTL_MINUTES:30}
+    expiry-sync-enabled: ${PAYMENT_EXPIRY_SYNC_ENABLED:false}
+    reconcile-enabled: ${PAYMENT_RECONCILE_ENABLED:false}
+    operations-enabled: ${PAYMENT_OPERATIONS_ENABLED:false}
+    sandbox:
+      app-id: ${ALIPAY_SANDBOX_APP_ID:}
+      seller-id: ${ALIPAY_SANDBOX_SELLER_ID:}
+      private-key-file: ${ALIPAY_SANDBOX_PRIVATE_KEY_FILE:}
+      public-key-file: ${ALIPAY_SANDBOX_PUBLIC_KEY_FILE:}
+      notify-url: ${ALIPAY_SANDBOX_NOTIFY_URL:}
+      return-url: ${ALIPAY_SANDBOX_RETURN_URL:http://localhost:5273/payment-return}
+      merchant-confirmed: ${ALIPAY_SANDBOX_MERCHANT_CONFIRMED:false}
+    production:
+      app-id: ${ALIPAY_PRODUCTION_APP_ID:}
+      seller-id: ${ALIPAY_PRODUCTION_SELLER_ID:}
+      private-key-file: ${ALIPAY_PRODUCTION_PRIVATE_KEY_FILE:}
+      public-key-file: ${ALIPAY_PRODUCTION_PUBLIC_KEY_FILE:}
+      notify-url: ${ALIPAY_PRODUCTION_NOTIFY_URL:}
+      return-url: ${ALIPAY_PRODUCTION_RETURN_URL:}
+      merchant-confirmed: ${ALIPAY_PRODUCTION_MERCHANT_CONFIRMED:false}
+  watcha:
+    environment: ${WATCHA_ENVIRONMENT:sandbox}
+    api-key: ${WATCHA_API_KEY:}
+    entitlement-id: ${WATCHA_ENTITLEMENT_ID:}
+logging:
+  level:
+    sdk.biz.err: OFF
+    sdk.biz.info: OFF

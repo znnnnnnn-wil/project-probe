@@ -10,11 +10,42 @@ import java.util.*;
 final class TrainingHistory {
 
   final Store s;
+  final PaymentService payment;
   static final String SCOPED =
-    " FROM trainings t WHERE t.user_id=?";
+    " FROM trainings t WHERE t.user_id=? AND t.status<>'PAYMENT_PENDING'";
 
   TrainingHistory(Store s) {
+    this(s, null);
+  }
+
+  TrainingHistory(Store s, PaymentService payment) {
     this.s = s;
+    this.payment = payment;
+  }
+
+  String scoped() {
+    return SCOPED + visibility("t");
+  }
+
+  String visibility(String alias) {
+    if (payment == null || !payment.trainingBillingEnabled()) return "";
+    return " AND (" + alias + ".package_id IS NULL OR EXISTS (SELECT 1 FROM training_packages p" +
+      " JOIN purchase_orders o ON o.id=p.order_id WHERE p.id=" + alias + ".package_id" +
+      " AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy'))))";
+  }
+
+  Object[] visibilityArgs() {
+    return payment != null && payment.trainingBillingEnabled()
+      ? new Object[] {payment.mode, payment.scope()}
+      : new Object[0];
+  }
+
+  Object[] queryArgs(String user, Object... extra) {
+    var args = new ArrayList<>();
+    args.add(user);
+    Collections.addAll(args, visibilityArgs());
+    Collections.addAll(args, extra);
+    return args.toArray();
   }
 
   static String hash(String text) {
@@ -49,9 +80,9 @@ final class TrainingHistory {
       more = s.locked(user, () -> {
         var rows = s.db.queryForList(
           "SELECT t.id,t.project_id,t.body" +
-            SCOPED +
+            scoped() +
             " AND t.history_key IS NULL ORDER BY t.created_at,t.id LIMIT 25",
-          user
+          queryArgs(user)
         );
         for (var row : rows) {
           var body = s.decode(row.get("body"));
@@ -107,12 +138,10 @@ final class TrainingHistory {
   ) {
     return (
       s.db.queryForObject(
-        "SELECT COUNT(*) FROM training_question_index q WHERE q.user_id=? AND (q.project_id=? OR q.history_key=?) AND q.question_hash=?",
+        "SELECT COUNT(*)" + SCOPED.replace(" WHERE", " JOIN training_question_index q ON q.training_id=t.id WHERE") +
+          visibility("t") + " AND q.user_id=t.user_id AND (q.project_id=? OR q.history_key=?) AND q.question_hash=?",
         Integer.class,
-        user,
-        projectId,
-        historyKey,
-        hash(ModelService.normalizeQuestion(question))
+        queryArgs(user, projectId, historyKey, hash(ModelService.normalizeQuestion(question)))
       ) > 0
     );
   }
@@ -125,12 +154,9 @@ final class TrainingHistory {
   ) {
     var rows = s.db.queryForList(
       "SELECT t.id,t.kind,t.status,t.created_at,t.body" +
-        SCOPED +
-        " AND (t.project_id=? OR t.history_key=?) AND t.id<>? ORDER BY t.created_at DESC,t.id DESC LIMIT 6",
-      user,
-      projectId,
-      historyKey,
-      excluding
+        scoped() +
+        " AND (t.project_id=? OR t.history_key=?) AND t.id<>? AND t.status<>'PAYMENT_VERIFYING' ORDER BY t.created_at DESC,t.id DESC LIMIT 6",
+      queryArgs(user, projectId, historyKey, excluding)
     );
     var turns = new ArrayList<Map<String, Object>>();
     var rounds = new ArrayList<Map<String, Object>>();
@@ -187,13 +213,10 @@ final class TrainingHistory {
     }
     int count = s.db.queryForObject(
       "SELECT COUNT(*)" +
-        SCOPED +
-        " AND (t.project_id=? OR t.history_key=?) AND t.id<>?",
+        scoped() +
+        " AND (t.project_id=? OR t.history_key=?) AND t.id<>? AND t.status<>'PAYMENT_VERIFYING'",
       Integer.class,
-      user,
-      projectId,
-      historyKey,
-      excluding
+      queryArgs(user, projectId, historyKey, excluding)
     );
     return Map.of(
       "historyTurns",

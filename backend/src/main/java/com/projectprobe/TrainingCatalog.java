@@ -7,22 +7,30 @@ import java.util.*;
 final class TrainingCatalog {
 
   final Store s;
+  final TrainingHistory history;
 
   TrainingCatalog(Store s) {
+    this(s, new TrainingHistory(s));
+  }
+
+  TrainingCatalog(Store s, TrainingHistory history) {
     this.s = s;
+    this.history = history;
   }
 
   Map<String, Object> overview(String user) {
     var stats = s.one(
       "SELECT COALESCE(SUM(CASE WHEN t.status NOT IN ('COMPLETED','REFUNDED') THEN 1 ELSE 0 END),0) AS active_count,COALESCE(SUM(CASE WHEN t.status='COMPLETED' THEN 1 ELSE 0 END),0) AS completed_count" +
-        TrainingHistory.SCOPED,
-      user
+        history.scoped(),
+      history.queryArgs(user)
     );
     var rows = s.db.queryForList(
       "SELECT t.*" +
-        TrainingHistory.SCOPED +
-        " AND (t.status NOT IN ('COMPLETED','REFUNDED') OR (t.status='COMPLETED' AND NOT EXISTS (SELECT 1 FROM trainings newer WHERE newer.user_id=t.user_id AND newer.project_id=t.project_id AND newer.status<>'REFUNDED' AND (newer.created_at>t.created_at OR (newer.created_at=t.created_at AND newer.id>t.id))))) ORDER BY t.created_at DESC,t.id DESC",
-      user
+        history.scoped() +
+        " AND (t.status NOT IN ('COMPLETED','REFUNDED') OR (t.status='COMPLETED' AND NOT EXISTS (SELECT 1 FROM trainings newer WHERE newer.user_id=t.user_id AND newer.project_id=t.project_id AND newer.status NOT IN ('REFUNDED','PAYMENT_PENDING')" +
+        history.visibility("newer") +
+        " AND (newer.created_at>t.created_at OR (newer.created_at=t.created_at AND newer.id>t.id))))) ORDER BY t.created_at DESC,t.id DESC",
+      history.queryArgs(user, history.visibilityArgs())
     );
     return Map.of(
       "items",
@@ -50,9 +58,7 @@ final class TrainingCatalog {
       project.length() > 36
     ) throw error(400, "分页或筛选参数不正确");
     String filter = "";
-    var args = new ArrayList<Object>(
-      List.of(user)
-    );
+    var args = new ArrayList<>(Arrays.asList(history.queryArgs(user)));
     if (!key.isBlank()) {
       filter += " AND (t.history_key=? OR t.project_id=?)";
       args.add(key);
@@ -63,7 +69,7 @@ final class TrainingCatalog {
       args.add(project);
     }
     long total = s.db.queryForObject(
-      "SELECT COUNT(*)" + TrainingHistory.SCOPED + filter,
+      "SELECT COUNT(*)" + history.scoped() + filter,
       Long.class,
       args.toArray()
     );
@@ -71,7 +77,7 @@ final class TrainingCatalog {
     args.add(offset);
     var rows = s.db.queryForList(
       "SELECT t.*" +
-        TrainingHistory.SCOPED +
+        history.scoped() +
         filter +
         " ORDER BY t.created_at DESC,t.id DESC LIMIT ? OFFSET ?",
       args.toArray()
@@ -88,11 +94,11 @@ final class TrainingCatalog {
   List<Map<String, String>> choices(String user) {
     var rows = s.db.queryForList(
       "SELECT DISTINCT t.history_key,t.project_id,pr.body" +
-        TrainingHistory.SCOPED.replace(
+        history.scoped().replaceFirst(
           " WHERE",
           " JOIN projects pr ON pr.id=t.project_id WHERE"
         ),
-      user
+      history.queryArgs(user)
     );
     var result = new TreeMap<String, Map<String, String>>();
     for (var row : rows) {
@@ -117,13 +123,11 @@ final class TrainingCatalog {
   }
 
   List<Map<String, Object>> all(String user, boolean summary, String project) {
-    var args = new ArrayList<Object>(
-      List.of(user)
-    );
+    var args = new ArrayList<>(Arrays.asList(history.queryArgs(user)));
     if (!project.isBlank()) args.add(project);
     var rows = s.db.queryForList(
       "SELECT t.*" +
-        TrainingHistory.SCOPED +
+        history.scoped() +
         (project.isBlank() ? "" : " AND t.project_id=?") +
         " ORDER BY t.created_at DESC,t.id DESC",
       args.toArray()
@@ -149,13 +153,11 @@ final class TrainingCatalog {
         .map(r -> r.get("id"))
         .toList();
       if (!parentIds.isEmpty()) {
-        var args = new ArrayList<Object>(
-          List.of(user)
-        );
+        var args = new ArrayList<>(Arrays.asList(history.queryArgs(user)));
         args.addAll(parentIds);
         relatedRows = s.db.queryForList(
           "SELECT t.*" +
-            TrainingHistory.SCOPED +
+            history.scoped() +
             " AND t.kind='RETEST' AND t.parent_id IN (" +
             String.join(",", Collections.nCopies(parentIds.size(), "?")) +
             ") ORDER BY t.created_at DESC,t.id DESC",

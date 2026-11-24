@@ -2,6 +2,7 @@ package com.projectprobe;
 
 import static com.projectprobe.Store.*;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
@@ -96,6 +97,78 @@ class WorkflowTest {
     assertEquals(2, s.db.queryForObject(
       "SELECT COUNT(*) FROM trainings WHERE user_id=? AND package_id IS NULL", Integer.class, user
     ));
+  }
+
+  @Test
+  void watchaStartPersistsBeforeChargingAndRetriesWithTheSameKey() {
+    var watcha = mock(WatchaPayment.class);
+    when(watcha.enabled()).thenReturn(true);
+    when(watcha.scope()).thenReturn("watcha:sandbox:ent_training");
+    var service = new TrainingService(s, projects, model, null, watcha);
+    String user = user();
+    var input = Map.of("projectId", project(user).get("id"), "requestKey", id());
+    var attempts = new ArrayList<String>();
+    doAnswer(invocation -> {
+      String trainingId = invocation.getArgument(1);
+      var row = service.row(user, trainingId);
+      assertEquals(TrainingService.PAYMENT_VERIFYING, row.get("status"));
+      assertEquals(input.get("requestKey"), row.get("request_key"));
+      attempts.add(trainingId);
+      if (attempts.size() == 1) throw error(402, "训练次数不足");
+      return null;
+    }).when(watcha).consume(eq(user), anyString());
+
+    assertEquals(402, assertThrows(ResponseStatusException.class, () -> service.start(user, input))
+      .getStatusCode().value());
+    assertTrue(service.all(user, true).isEmpty());
+    String trainingId = str(service.start(user, input), "id");
+    assertEquals("ACTIVE", service.start(user, input).get("status"));
+    assertEquals(List.of(trainingId, trainingId), attempts);
+    assertEquals("ACTIVE", service.generate(user, trainingId).get("status"));
+    assertEquals(2, attempts.size());
+  }
+
+  @Test
+  void watchaRetryAfterAnUnknownResultRequiresTheOriginalPaymentScope() {
+    var watcha = mock(WatchaPayment.class);
+    when(watcha.enabled()).thenReturn(true);
+    when(watcha.scope()).thenReturn("watcha:sandbox:ent_training");
+    var service = new TrainingService(s, projects, model, null, watcha);
+    String user = user();
+    var input = Map.of("projectId", project(user).get("id"), "requestKey", id());
+    doThrow(error(503, "暂时无法核对")).doNothing().when(watcha).consume(eq(user), anyString());
+
+    assertEquals(503, assertThrows(ResponseStatusException.class, () -> service.start(user, input))
+      .getStatusCode().value());
+    var pending = service.all(user, true).get(0);
+    assertEquals(TrainingService.PAYMENT_VERIFYING, pending.get("status"));
+    String trainingId = str(pending, "id");
+    assertTrue(list(service.get(user, trainingId), "turns").isEmpty());
+    when(watcha.scope()).thenReturn("watcha:live:ent_training");
+    assertEquals(503, assertThrows(ResponseStatusException.class, () -> service.generate(user, trainingId))
+      .getStatusCode().value());
+    verify(watcha).consume(user, trainingId);
+    when(watcha.scope()).thenReturn("watcha:sandbox:ent_training");
+    assertEquals("ACTIVE", service.generate(user, trainingId).get("status"));
+    verify(watcha, times(2)).consume(user, trainingId);
+  }
+
+  @Test
+  void watchaRejectsInvalidInputAndClosedAccountsBeforeCharging() {
+    var watcha = mock(WatchaPayment.class);
+    when(watcha.enabled()).thenReturn(true);
+    when(watcha.scope()).thenReturn("watcha:sandbox:ent_training");
+    var service = new TrainingService(s, projects, model, null, watcha);
+    String user = user();
+    var input = new HashMap<String, Object>(Map.of(
+      "projectId", project(user).get("id"), "requestKey", id(), "difficulty", "UNKNOWN"));
+    assertEquals(400, assertThrows(ResponseStatusException.class, () -> service.start(user, input))
+      .getStatusCode().value());
+    input.remove("difficulty");
+    s.db.update("UPDATE app_users SET username=? WHERE id=?", "closed-" + id(), user);
+    assertEquals(401, assertThrows(ResponseStatusException.class, () -> service.start(user, input))
+      .getStatusCode().value());
+    verify(watcha, never()).consume(anyString(), anyString());
   }
 
   Map<String, Object> start(String user, Map<String, Object> p) {

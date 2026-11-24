@@ -84,6 +84,11 @@ public class Store {
     });
   }
 
+  void requireActiveAccount(String user) {
+    var account = one("SELECT username FROM app_users WHERE id=?", user);
+    if (str(account, "username").startsWith("closed-")) throw error(401, "请重新登录");
+  }
+
   static String str(Map<String, ?> m, String key) {
     return Objects.toString(m.get(key), "");
   }
