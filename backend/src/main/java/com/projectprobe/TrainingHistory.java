@@ -10,13 +10,11 @@ import java.util.*;
 final class TrainingHistory {
 
   final Store s;
-  final PaymentService payments;
   static final String SCOPED =
-    " FROM trainings t JOIN training_packages p ON p.id=t.package_id JOIN purchase_orders o ON o.id=p.order_id WHERE t.user_id=? AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy'))";
+    " FROM trainings t WHERE t.user_id=?";
 
-  TrainingHistory(Store s, PaymentService payments) {
+  TrainingHistory(Store s) {
     this.s = s;
-    this.payments = payments;
   }
 
   static String hash(String text) {
@@ -53,9 +51,7 @@ final class TrainingHistory {
           "SELECT t.id,t.project_id,t.body" +
             SCOPED +
             " AND t.history_key IS NULL ORDER BY t.created_at,t.id LIMIT 25",
-          user,
-          payments.mode,
-          payments.scope()
+          user
         );
         for (var row : rows) {
           var body = s.decode(row.get("body"));
@@ -111,14 +107,12 @@ final class TrainingHistory {
   ) {
     return (
       s.db.queryForObject(
-        "SELECT COUNT(*) FROM training_question_index q JOIN trainings t ON t.id=q.training_id JOIN training_packages p ON p.id=t.package_id JOIN purchase_orders o ON o.id=p.order_id WHERE q.user_id=? AND (q.project_id=? OR q.history_key=?) AND q.question_hash=? AND o.mode=? AND (o.account_scope=? OR (o.mode='mock' AND o.account_scope='legacy'))",
+        "SELECT COUNT(*) FROM training_question_index q WHERE q.user_id=? AND (q.project_id=? OR q.history_key=?) AND q.question_hash=?",
         Integer.class,
         user,
         projectId,
         historyKey,
-        hash(ModelService.normalizeQuestion(question)),
-        payments.mode,
-        payments.scope()
+        hash(ModelService.normalizeQuestion(question))
       ) > 0
     );
   }
@@ -134,8 +128,6 @@ final class TrainingHistory {
         SCOPED +
         " AND (t.project_id=? OR t.history_key=?) AND t.id<>? ORDER BY t.created_at DESC,t.id DESC LIMIT 6",
       user,
-      payments.mode,
-      payments.scope(),
       projectId,
       historyKey,
       excluding
@@ -199,8 +191,6 @@ final class TrainingHistory {
         " AND (t.project_id=? OR t.history_key=?) AND t.id<>?",
       Integer.class,
       user,
-      payments.mode,
-      payments.scope(),
       projectId,
       historyKey,
       excluding

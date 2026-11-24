@@ -17,8 +17,6 @@ import org.springframework.web.server.ResponseStatusException;
     "spring.datasource.username=${PROBE_TEST_DB_USER:sa}",
     "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
-    "app.payment.reconcile-enabled=false",
   }
 )
 class ExtractionRegressionTest {
@@ -70,7 +68,7 @@ class ExtractionRegressionTest {
   }
 
   @Test
-  void repeatedExtractionPreservesConfirmedFactsAndUsesNoExtraQuota() {
+  void repeatedExtractionPreservesConfirmedFactsAndUsesCachedResult() {
     var u = user();
     var p = project(u);
     var calls = new AtomicInteger();
@@ -91,12 +89,6 @@ class ExtractionRegressionTest {
       );
     }
     assertEquals(1, calls.get());
-    assertEquals(
-      1,
-      s
-        .one("SELECT * FROM extraction_limits WHERE user_id=?", u)
-        .get("attempts")
-    );
     p.put("implementation", "增加唯一约束");
     service.save(u, pid, p);
     service.extract(u, pid);
@@ -104,76 +96,35 @@ class ExtractionRegressionTest {
   }
 
   @Test
-  void quotaIsSharedAcrossInstancesAndAccountsAreIndependent() {
+  void oldExtractionLimitDoesNotBlockNewProjectMaterials() {
     var u = user();
-    var p = project(u);
+    s.db.update("INSERT INTO extraction_limits(user_id,window_start,attempts,lease_until) VALUES (?,?,20,?)",
+      u, now(), now() + 90_000);
     var calls = new AtomicInteger();
-    var counted = counted(calls);
-    var first = new ProjectService(s, counted);
-    first.extractionDailyLimit = 1;
-    first.extract(u, str(p, "id"));
-    var second = new ProjectService(s, counted);
-    second.extractionDailyLimit = 1;
-    var another = project(u);
-    var error = assertThrows(ResponseStatusException.class, () ->
-      second.extract(u, str(another, "id"))
-    );
-    assertEquals(429, error.getStatusCode().value());
-    assertEquals(1, calls.get());
-    // 已缓存结果即使额度用完也可以读取。
-    second.extract(u, str(p, "id"));
-    assertEquals(1, calls.get());
-    s.db.update(
-      "UPDATE extraction_limits SET window_start=? WHERE user_id=?",
-      now() - 86400001,
-      u
-    );
-    second.extract(u, str(another, "id"));
-    assertEquals(2, calls.get());
-    var other = user();
-    second.extract(other, str(project(other), "id"));
-    assertEquals(3, calls.get());
+    var service = new ProjectService(s, counted(calls));
+    for (int i = 0; i < 21; i++) {
+      String projectId = str(project(u), "id");
+      assertFalse(list(service.extract(u, projectId), "facts").isEmpty());
+    }
+    assertEquals(21, calls.get());
   }
 
   @Test
-  void failureReleasesLeaseButConsumesQuota() {
+  void failedExtractionCanBeRetriedImmediately() {
     var u = user();
-    var p = project(u);
+    String projectId = str(project(u), "id");
     var calls = new AtomicInteger();
-    var failing = new ModelService(
-      s,
-      "demo",
-      "https://example.test/v1",
-      "",
-      "",
-      "test"
-    ) {
-      @Override
-      List<Map<String, Object>> extract(Map<String, Object> p) {
-        calls.incrementAndGet();
-        throw error(503, "合成失败");
+    var model = new ModelService(s, "demo", "https://example.test/v1", "", "", "test") {
+      @Override List<Map<String, Object>> extract(Map<String, Object> p) {
+        if (calls.incrementAndGet() == 1) throw error(503, "合成失败");
+        return demoModel.extract(p);
       }
     };
-    var service = new ProjectService(s, failing);
-    service.extractionDailyLimit = 1;
-    assertThrows(ResponseStatusException.class, () ->
-      service.extract(u, str(p, "id"))
-    );
-    assertEquals(
-      0L,
-      s
-        .one("SELECT * FROM extraction_limits WHERE user_id=?", u)
-        .get("lease_until")
-    );
-    assertEquals(
-      429,
-      assertThrows(ResponseStatusException.class, () ->
-        service.extract(u, str(p, "id"))
-      )
-        .getStatusCode()
-        .value()
-    );
-    assertEquals(1, calls.get());
+    var service = new ProjectService(s, model);
+    assertEquals(503, assertThrows(ResponseStatusException.class, () ->
+      service.extract(u, projectId)).getStatusCode().value());
+    assertFalse(list(service.extract(u, projectId), "facts").isEmpty());
+    assertEquals(2, calls.get());
   }
 
   @Test
@@ -182,6 +133,7 @@ class ExtractionRegressionTest {
     var u = user();
     var p = project(u);
     var pid = str(p, "id");
+    var otherProject = str(project(u), "id");
     var entered = new CountDownLatch(1);
     var release = new CountDownLatch(1);
     var calls = new AtomicInteger();
@@ -196,6 +148,7 @@ class ExtractionRegressionTest {
       @Override
       List<Map<String, Object>> extract(Map<String, Object> p) {
         calls.incrementAndGet();
+        if (otherProject.equals(p.get("id"))) return demoModel.extract(p);
         entered.countDown();
         try {
           if (
@@ -222,6 +175,7 @@ class ExtractionRegressionTest {
           .getStatusCode()
           .value()
       );
+      assertFalse(list(second.extract(u, otherProject), "facts").isEmpty());
       p.put("implementation", "调用期间修改的材料");
       projects.save(u, pid, p);
       release.countDown();
@@ -233,12 +187,10 @@ class ExtractionRegressionTest {
         ((ResponseStatusException) failure.getCause()).getStatusCode().value()
       );
       assertTrue(list(projects.get(u, pid), "facts").isEmpty());
-      assertEquals(1, calls.get());
+      assertEquals(2, calls.get());
       assertEquals(
-        0L,
-        s
-          .one("SELECT * FROM extraction_limits WHERE user_id=?", u)
-          .get("lease_until")
+        0,
+        s.db.queryForObject("SELECT COUNT(*) FROM material_jobs WHERE user_id=?", Integer.class, u)
       );
     } finally {
       release.countDown();
@@ -262,7 +214,7 @@ class ExtractionRegressionTest {
       @Override
       List<Map<String, Object>> extract(Map<String, Object> p) {
         s.db.update(
-          "UPDATE extraction_limits SET lease_token=?,lease_until=? WHERE user_id=?",
+          "UPDATE material_jobs SET token=?,expires_at=? WHERE user_id=? AND kind='EXTRACTION'",
           replacement,
           now() + 90000,
           u
@@ -282,8 +234,8 @@ class ExtractionRegressionTest {
     assertEquals(
       replacement,
       s
-        .one("SELECT * FROM extraction_limits WHERE user_id=?", u)
-        .get("lease_token")
+        .one("SELECT token FROM material_jobs WHERE user_id=? AND kind='EXTRACTION'", u)
+        .get("token")
     );
     assertTrue(list(projects.get(u, str(p, "id")), "facts").isEmpty());
   }

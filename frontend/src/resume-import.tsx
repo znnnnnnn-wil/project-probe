@@ -1,5 +1,5 @@
-import React, { useRef, useState } from "react";
-import { Upload, FileText, ArrowRight, LoaderCircle, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Upload, ArrowRight, LoaderCircle, X } from "lucide-react";
 import { upload } from "./api";
 import type { Project } from "./types";
 
@@ -16,56 +16,63 @@ export type ResumeCandidate = Pick<
   | "problems"
   | "verification"
 >;
-export function ResumeImport({
-  disabled,
-  onSelect,
-  onBusy,
-}: {
+
+type ResumeImportProps = {
   disabled: boolean;
-  onSelect: (candidate: ResumeCandidate) => void;
   onBusy: (busy: boolean) => void;
-}) {
+} & (
+  | { onProjects: (candidates: ResumeCandidate[]) => void; onSelect?: never }
+  | { onSelect: (candidate: ResumeCandidate) => void; onProjects?: never }
+);
+
+export function ResumeImport({ disabled, onSelect, onProjects, onBusy }: ResumeImportProps) {
   const fileInput = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [duplicate, setDuplicate] = useState(false);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [filename, setFilename] = useState("");
-  const [candidates, setCandidates] = useState<ResumeCandidate[] | null>(null);
+  const [pendingFile, setPendingFile] = useState("");
+  const [candidates, setCandidates] = useState<ResumeCandidate[]>([]);
   const [consent, setConsent] = useState(false);
-  const request = useRef(0);
+  const request = useRef<AbortController | null>(null);
+  const busy = !!pendingFile;
+  useEffect(() => () => request.current?.abort(), []);
+
   const read = async (file: File) => {
+    if (disabled || !consent || request.current) return;
     setError("");
     setDuplicate(false);
     setWarnings([]);
-    setCandidates(null);
     if (file.size > 5 * 1024 * 1024 || !/\.(pdf|docx|txt)$/i.test(file.name)) {
-      setError("请上传5MB以内的PDF、DOCX或UTF-8 TXT简历");
+      setError("请上传 5 MB 以内的 PDF、DOCX 或 UTF-8 TXT 简历");
       return;
     }
-    const serial = ++request.current;
-    setBusy(true);
+    const controller = new AbortController();
+    request.current = controller;
+    setPendingFile(file.name);
     onBusy(true);
-    setFilename(file.name);
     try {
       const result = await upload<{
         projects: ResumeCandidate[];
         duplicate: boolean;
         warnings?: string[];
-      }>("/resume/import", file, file.name);
-      if (serial === request.current) {
+      }>("/resume/import", file, file.name, {}, controller.signal);
+      if (controller.signal.aborted) return;
+      setDuplicate(result.duplicate === true);
+      setWarnings(result.warnings ?? []);
+      if (!result.projects.length) {
+        setError("未识别到项目经历，可换一份简历或手动填写。");
+      } else if (onProjects) {
+        onProjects(result.projects);
+      } else {
         setCandidates(result.projects);
-        setDuplicate(result.duplicate === true);
-        setWarnings(result.warnings ?? []);
-        if (!result.projects.length)
-          setError("未识别到项目经历，可换一份简历或手动填写");
       }
     } catch (cause) {
-      if (serial === request.current)
+      if (!controller.signal.aborted)
         setError(cause instanceof Error ? cause.message : "简历识别失败");
     } finally {
-      if (serial === request.current) {
-        setBusy(false);
+      request.current = null;
+      if (!controller.signal.aborted) {
+        setPendingFile("");
         onBusy(false);
       }
     }
@@ -73,10 +80,7 @@ export function ResumeImport({
   return (
     <section className="resume-import" aria-label="导入简历">
       <div className="input-tool-heading">
-        <h3>
-          <FileText size={18} />
-          从简历开始
-        </h3>
+        <span>PDF、DOCX、TXT，最大 5 MB</span>
         <button
           type="button"
           className="button secondary"
@@ -96,6 +100,7 @@ export function ResumeImport({
         type="file"
         aria-label="上传简历文件"
         accept=".pdf,.docx,.txt"
+        disabled={disabled || busy || !consent}
         hidden
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -112,13 +117,10 @@ export function ResumeImport({
         />
         同意将简历文字发送至模型服务，并在本账号缓存识别结果30天
       </label>
-      <p className="material-privacy">
-        PDF / DOCX / TXT ·
-        最大5MB。请先脱敏；原文件不保存，识别结果仅在本账号复用，选中的经历需另行保存为项目材料。
-      </p>
+      <p className="input-status">请先脱敏。原文件不保存。</p>
       {busy && (
         <p role="status" className="input-status">
-          正在读取 {filename}
+          正在识别 {pendingFile}
         </p>
       )}
       {error && (
@@ -128,7 +130,7 @@ export function ResumeImport({
       )}
       {duplicate && (
         <p role="status" className="input-status">
-          这份简历已上传过，已读取上次识别结果，不重复调用模型或消耗识别次数。
+          这份简历已上传过，本次使用上次的识别结果。
         </p>
       )}
       {warnings.length > 0 && (
@@ -138,7 +140,7 @@ export function ResumeImport({
           ))}
         </div>
       )}
-      {!!candidates?.length && (
+      {onSelect && candidates.length > 0 && (
         <div className="resume-candidates">
           <div className="panel-heading">
             <strong>识别到 {candidates.length} 个项目</strong>
@@ -148,7 +150,7 @@ export function ResumeImport({
               title="关闭识别结果"
               aria-label="关闭识别结果"
               onClick={() => {
-                setCandidates(null);
+                setCandidates([]);
                 setDuplicate(false);
                 setWarnings([]);
               }}
@@ -165,9 +167,9 @@ export function ResumeImport({
                   <summary>简历原文</summary>
                   <p>{candidate.resume}</p>
                 </details>
-                {!candidate.responsibility && (
+                {!candidate.background && !candidate.resume && (
                   <small className="action-error">
-                    未注明个人职责，需要补充后再保存
+                    未注明项目简介或经历，建议补充后再保存
                   </small>
                 )}
               </div>

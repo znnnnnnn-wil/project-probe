@@ -138,7 +138,7 @@ public class Store {
       !(m.get(key) instanceof String value) ||
       value.isBlank() ||
       value.length() > max
-    ) throw error(503, "模型输出文本字段不正确：" + key);
+    ) throw error(503, "模型输出文本字段不正确：" + key + "（须为非空文本，最多" + max + "字符，英文和标点也逐字符计数）");
     return ((String) m.get(key)).strip();
   }
 }

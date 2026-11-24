@@ -22,7 +22,6 @@ async function fixture(page: Page) {
     createdAt: Date.now(),
     focus: "验证",
     interviewFacts: [],
-    packageId: "synthetic-package",
   };
   let reads = 0;
   let release: () => void = () => {};
@@ -35,8 +34,6 @@ async function fixture(page: Page) {
     if (path === "/api/config")
       json = {
         modelMode: "demo",
-        paymentMode: "mock",
-        paymentConfigured: false,
       };
     else if (path === "/api/me")
       json = { id: "synthetic-user", username: "轮询回归" };
@@ -74,14 +71,6 @@ async function fixture(page: Page) {
     else if (path === "/api/projects" || path === "/api/trainings") json = [];
     else if (path === "/api/training-overview")
       json = { items: [], activeCount: 0, completedCount: 0 };
-    else if (path === "/api/shop")
-      json = {
-        mode: "mock",
-        configured: false,
-        orders: [],
-        packages: [],
-        product: {},
-      };
     else throw new Error("未预期请求：" + request.method() + " " + path);
     await route.fulfill({ json });
   });

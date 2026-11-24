@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "./api";
 
-type Draft = { turnId: string; answer: string; version: number };
-export function useAnswerDraft(trainingId: string, turnId?: string, active = false) {
+type Draft = { turnId: string; answer: string; version: number; questionVersion?: number };
+export function useAnswerDraft(trainingId: string, turnId?: string, active = false, questionVersion = 0) {
   const [answer, setAnswer] = useState("");
   const [notice, setNotice] = useState("");
   const [ready, setReady] = useState(false);
@@ -27,6 +27,10 @@ export function useAnswerDraft(trainingId: string, turnId?: string, active = fal
     if (!turnId || !active) return () => controller.abort();
     api<Draft>(`/trainings/${trainingId}/draft`, "GET", undefined, controller.signal).then(draft => {
       if (cancelled || draft.turnId !== turnId) return;
+      if ((draft.questionVersion || 0) !== questionVersion) {
+        setNotice("题目已调整，请重新加载并核对草稿后再提交；本页草稿仍保留。");
+        return;
+      }
       version.current = draft.version;
       const pendingLocal = unsynced && localVersion === draft.version;
       if (draft.version > 0 && local && local !== draft.answer && !pendingLocal) setLocalCopy(local);
@@ -37,7 +41,7 @@ export function useAnswerDraft(trainingId: string, turnId?: string, active = fal
       setReady(true);
     }).catch(() => { if (!cancelled) setNotice("草稿同步失败，当前内容仍保留在此标签页。重新打开训练可重试。"); });
     return () => { cancelled = true; controller.abort(); };
-  }, [trainingId, turnId, active, key]);
+  }, [trainingId, turnId, active, key, questionVersion]);
   useEffect(() => {
     if (!ready || !active || !turnId) return;
     let cancelled = false;
@@ -45,7 +49,7 @@ export function useAnswerDraft(trainingId: string, turnId?: string, active = fal
       if (!dirty.current || saving.current || blocked.current) return;
       const value = current.current; saving.current = true;
       try {
-        const saved = await api<Draft>(`/trainings/${trainingId}/draft`, "PUT", { turnId, answer: value, version: version.current });
+        const saved = await api<Draft>(`/trainings/${trainingId}/draft`, "PUT", { turnId, questionVersion, answer: value, version: version.current });
         if (cancelled) return;
         version.current = saved.version; dirty.current = current.current !== value;
         sessionStorage.setItem(key + ".sync", JSON.stringify({ version: saved.version, unsynced: dirty.current }));
@@ -57,7 +61,7 @@ export function useAnswerDraft(trainingId: string, turnId?: string, active = fal
       } finally { saving.current = false; }
     }, 1500);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [ready, active, trainingId, turnId]);
+  }, [ready, active, trainingId, turnId, questionVersion]);
   const edit = (value: string) => {
     setAnswer(value); current.current = value; dirty.current = true;
     sessionStorage.setItem(key, value);

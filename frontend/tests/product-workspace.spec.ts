@@ -27,7 +27,7 @@ for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ]) {
-  test(`工作台、材料草稿、来源购买与复盘持久化 ${viewport.width}`, async ({
+  test(`工作台、材料草稿、继续训练与复盘持久化 ${viewport.width}`, async ({
     page,
   }) => {
     await page.setViewportSize(viewport);
@@ -38,7 +38,7 @@ for (const viewport of [
     await expect(
       page.getByRole("heading", { name: "我的项目", exact: true }),
     ).toBeVisible();
-    await expect(page.locator(".workspace-stats")).toContainText("可用深挖");
+    await expect(page.getByLabel("练习概览")).toHaveCount(0);
     await page.getByLabel("搜索项目").fill("不存在的项目");
     await expect(
       page.getByRole("heading", { name: "没有匹配的项目" }),
@@ -49,56 +49,23 @@ for (const viewport of [
       path: `test-results/workspace-${viewport.width}.png`,
       fullPage: true,
     });
-    await page.getByRole("link", { name: "进入项目", exact: true }).click();
-    await page.getByRole("button", { name: "展开技术栈、实现与验证等补充材料" }).click();
+    await page.getByRole("link", { name: "编辑材料", exact: true }).click();
     await page
-      .getByLabel("验证方式", { exact: true })
+      .getByLabel("项目经历")
       .fill("未保存的合成验证笔记");
     page.on("dialog", (dialog) => dialog.accept());
     await page.reload();
-    await expect(page.getByLabel("验证方式", { exact: true })).toHaveValue(
+    await expect(page.getByLabel("项目经历")).toHaveValue(
       "未保存的合成验证笔记",
     );
     await expect(page.getByRole("status")).toContainText(
       "已恢复此标签页未保存的材料",
     );
     await page.getByRole("button", { name: "保存项目材料" }).click();
-    await page.getByRole("button", { name: "事实核对", exact: true }).click();
-    await page
-      .getByRole("button", { name: "提取项目事实", exact: true })
-      .click();
-    await page.getByRole("button", { name: "保存核对结果" }).click();
-    await page
-      .getByLabel("事实 1", { exact: true })
-      .fill("修改后的合成事实说明");
-    await page.reload();
-    await expect(page.getByLabel("事实 1", { exact: true })).toHaveValue(
-      "修改后的合成事实说明",
-    );
-    await expect(page.getByRole("status")).toContainText(
-      "已恢复尚未保存的事实核对",
-    );
-    await page.getByRole("button", { name: "放弃本次核对修改" }).click();
-    await expect(page.getByLabel("事实 1", { exact: true })).not.toHaveValue(
-      "修改后的合成事实说明",
-    );
-    await page.screenshot({
-      path: `test-results/fact-review-${viewport.width}.png`,
-      fullPage: true,
-    });
-    await page.getByRole("link", { name: "查看训练包与剩余次数" }).click();
-    await expect(page.locator(".purchase-context")).toBeVisible();
-    await page.getByRole("button", { name: "创建模拟订单" }).click();
-    await page.getByRole("button", { name: "模拟支付成功" }).click();
-    await expect(page.getByText("已确认，权益已发放")).toBeVisible();
-    await page.getByRole("link", { name: "返回原项目开始练习" }).click();
-    await expect(page).toHaveURL(new RegExp("#/projects/" + project.id + "$"));
-    await expect(page.locator(".readiness-list")).toContainText(
-      "剩余 10 次可用深挖",
-    );
-    await page.getByRole("button", { name: "开始项目深挖" }).click();
-    await expect(page).toHaveURL(/#\/trainings\/[a-f0-9-]+$/);
-    const trainingId = page.url().split("/").pop()!;
+    await expect(page.getByRole("button", { name: "事实核对", exact: true })).toHaveCount(0);
+    const training = await post("/trainings", { projectId: project.id, requestKey: crypto.randomUUID() });
+    const trainingId = training.id;
+    await page.goto("/#/trainings/" + trainingId);
     await page
       .getByLabel("你的回答", { exact: true })
       .fill(
@@ -179,15 +146,23 @@ for (const viewport of [
   });
 }
 
-test("未登录体验不触发模型或订单，原页面登录后恢复", async ({ page }) => {
+test("已有旧版示例不发出写入请求，登录后回到原页面", async ({ page }) => {
   const writes: string[] = [];
   page.on("request", (r) => {
     if (r.method() === "POST") writes.push(r.url());
   });
-  await page.goto("/");
-  await page.getByLabel("体验回答").fill("我需要核对检查和写入的并发边界。");
-  await page.getByRole("button", { name: "查看复盘角度" }).click();
-  await expect(page.locator(".sample-feedback")).toContainText("固定场景");
+  await page.addInitScript(() => {
+    const key = "project-probe:experience:v1";
+    if (!sessionStorage.getItem(key)) sessionStorage.setItem(key, JSON.stringify({
+      version: 1, sample: "booking", started: true, answers: [], draft: "",
+      notes: Array(5).fill(""), checked: Array(5).fill(false),
+    }));
+  });
+  await page.goto("/#/experience?mode=legacy");
+  const answer = page.getByLabel("本轮回答");
+  await answer.fill("我需要核对检查和写入的并发边界。");
+  await page.getByRole("button", { name: "保存回答，继续追问" }).click();
+  await expect(answer).toHaveValue("");
   expect(writes).toEqual([]);
   await page.goto("/#/projects/new");
   await page

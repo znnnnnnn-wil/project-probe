@@ -9,15 +9,14 @@ import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest(properties = {"spring.datasource.url=${PROBE_TEST_DB_URL:jdbc:h2:mem:drafts;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}",
   "spring.datasource.username=${PROBE_TEST_DB_USER:sa}", "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
-  "app.model-mode=demo", "app.payment.mode=mock", "app.payment.reconcile-enabled=false"})
+  "app.model-mode=demo"})
 class AnswerDraftsTest {
   @Autowired Store s;
   @Autowired ProjectService projects;
-  @Autowired PaymentService payments;
   @Autowired TrainingService trainings;
   @Autowired AnswerDrafts drafts;
   @Test void draftsArePrivateVersionedAndNotUsedAsSubmittedEvidence() {
-    var f = TrainingFixture.create(s, projects, payments, trainings);
+    var f = TrainingFixture.create(s, projects, trainings);
     String training = str(f.training(), "id"), turn = str(list(f.training(), "turns").get(0), "id");
     var input = Map.<String, Object>of("turnId", turn, "answer", "尚未提交的私人草稿", "version", 0);
     assertEquals(1, drafts.save(f.user(), training, input).get("version"));

@@ -49,20 +49,30 @@ export function encodeWav(chunks: Float32Array[], sampleRate: number): Blob {
 
 export function VoiceInput({
   trainingId,
+  projectId,
   turnId,
+  questionVersion = 0,
   disabled,
   remaining,
   onAppend,
   onBusy,
-}: {
+}: ({
   trainingId: string;
+  projectId?: never;
+  questionVersion?: number;
+} | {
+  projectId: string;
+  trainingId?: never;
+  questionVersion?: never;
+}) & {
   turnId: string;
   disabled: boolean;
   remaining: number;
   onAppend: (text: string) => void;
   onBusy: (busy: boolean) => void;
 }) {
-  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const practice = projectId !== undefined;
+  const [enabled, setEnabled] = useState<boolean | null>(practice ? true : null);
   const [state, setState] = useState<
     "idle" | "requesting" | "recording" | "recorded" | "transcribing"
   >("idle");
@@ -102,20 +112,22 @@ export function VoiceInput({
   };
   useEffect(() => {
     mounted.current = true;
-    api<{ speechEnabled?: boolean }>("/config")
-      .then((config) => {
-        if (mounted.current) setEnabled(!!config.speechEnabled);
-      })
-      .catch(() => {
-        if (mounted.current) setEnabled(false);
-      });
+    if (!practice) {
+      api<{ speechEnabled?: boolean }>("/config")
+        .then((config) => {
+          if (mounted.current) setEnabled(!!config.speechEnabled);
+        })
+        .catch(() => {
+          if (mounted.current) setEnabled(false);
+        });
+    }
     return () => {
       mounted.current = false;
       release();
       URL.revokeObjectURL(url.current);
       busyCallback.current(false);
     };
-  }, []);
+  }, [practice]);
   useEffect(() => {
     onBusy(["requesting", "recording", "transcribing"].includes(state));
   }, [state, onBusy]);
@@ -144,7 +156,8 @@ export function VoiceInput({
     setAudioUrl(url.current);
     setState("recorded");
     setLevel(0);
-    void transcribe();
+    // Project practice requires a deliberate upload action for each recording.
+    if (!practice) void transcribe();
   };
   const discard = () => {
     setError("");
@@ -309,10 +322,12 @@ export function VoiceInput({
     setState("transcribing");
     try {
       const result = await upload<{ text: string }>(
-        "/trainings/" + trainingId + "/transcribe",
+        practice
+          ? "/projects/" + projectId + "/practice/transcribe"
+          : "/trainings/" + trainingId + "/transcribe",
         blob.current,
         "answer.wav",
-        { turnId },
+        practice ? { turnId } : { turnId, questionVersion: String(questionVersion) },
       );
       if (mounted.current) {
         const text = result.text.trim();
@@ -339,22 +354,23 @@ export function VoiceInput({
   };
   const active = ["requesting", "recording", "transcribing"].includes(state);
   return (
-    <div className="voice-input">
+    <div className={practice ? "voice-input practice-cloud-voice" : "voice-input"}>
       <div className="input-tool-heading">
         <span>
           <Mic size={16} />
-          语音回答
+          {practice ? "ASR 语音转写" : "语音回答"}
         </span>
         {state === "idle" && (
           <button
             type="button"
-            className="icon-button"
+            className={practice ? "button" : "icon-button"}
             title="开始录音（云端语音转写）"
-            aria-label="开始录音"
+            aria-label={practice ? "开始语音输入" : "开始录音"}
             disabled={disabled || !enabled}
             onClick={() => void start()}
           >
             <Mic size={16} />
+            {practice && "开始说话"}
           </button>
         )}
         {state === "requesting" && (
@@ -366,15 +382,21 @@ export function VoiceInput({
         {state === "recording" && (
           <button
             type="button"
-            className="icon-button recording-button"
+            className={practice ? "button" : "icon-button recording-button"}
             title="结束录音"
             aria-label="结束录音"
             onClick={() => stop()}
           >
             <Square size={15} />
+            {practice && "结束录音"}
           </button>
         )}
       </div>
+      {practice && (
+        <p className="input-status">
+          录音暂存在此页面。点击「发送至百炼转写」会将这段录音发送至阿里云百炼。
+        </p>
+      )}
       {notice && (
         <p className="input-status" role="status">
           {notice}
@@ -384,6 +406,7 @@ export function VoiceInput({
       {state === "recording" && (
         <div className="recording-status" role="status">
           <span className="recording-dot" />
+          {practice && "录音中 "}
           {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")} /
           3:00
           <div className="audio-meter">
@@ -406,10 +429,10 @@ export function VoiceInput({
           <div className="input-tool-actions">
             <button
               type="button"
-              className="icon-button"
+              className={practice ? "button secondary" : "icon-button"}
               disabled={active || disabled}
-              title="重试转写"
-              aria-label="重试转写"
+              title={practice ? "发送至百炼转写" : "重试转写"}
+              aria-label={practice ? "发送至百炼转写" : "重试转写"}
               onClick={() => void transcribe()}
             >
               {state === "transcribing" ? (
@@ -417,6 +440,7 @@ export function VoiceInput({
               ) : (
                 <FileText size={16} />
               )}
+              {practice && "发送至百炼转写"}
             </button>
             <button
               type="button"
@@ -470,7 +494,7 @@ export function VoiceInput({
           </div>
           {transcript.trim().length > remaining && (
             <p role="alert" className="action-error">
-              合并后超过6000字，请缩短转写或已有回答
+              {practice ? "转写超过剩余字数，请缩短后加入" : "合并后超过6000字，请缩短转写或已有回答"}
             </p>
           )}
         </div>

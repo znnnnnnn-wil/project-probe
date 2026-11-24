@@ -7,30 +7,22 @@ import java.util.*;
 final class TrainingCatalog {
 
   final Store s;
-  final PaymentService payments;
 
-  TrainingCatalog(Store s, PaymentService payments) {
+  TrainingCatalog(Store s) {
     this.s = s;
-    this.payments = payments;
   }
 
   Map<String, Object> overview(String user) {
     var stats = s.one(
       "SELECT COALESCE(SUM(CASE WHEN t.status NOT IN ('COMPLETED','REFUNDED') THEN 1 ELSE 0 END),0) AS active_count,COALESCE(SUM(CASE WHEN t.status='COMPLETED' THEN 1 ELSE 0 END),0) AS completed_count" +
         TrainingHistory.SCOPED,
-      user,
-      payments.mode,
-      payments.scope()
+      user
     );
     var rows = s.db.queryForList(
-      "SELECT t.*,o.status AS source_order_status" +
+      "SELECT t.*" +
         TrainingHistory.SCOPED +
-        " AND (t.status NOT IN ('COMPLETED','REFUNDED') OR (t.status<>'REFUNDED' AND NOT EXISTS (SELECT 1 FROM trainings newer JOIN training_packages np ON np.id=newer.package_id JOIN purchase_orders no2 ON no2.id=np.order_id WHERE newer.user_id=t.user_id AND newer.project_id=t.project_id AND newer.status<>'REFUNDED' AND no2.mode=? AND (no2.account_scope=? OR (no2.mode='mock' AND no2.account_scope='legacy')) AND (newer.created_at>t.created_at OR (newer.created_at=t.created_at AND newer.id>t.id))))) ORDER BY t.created_at DESC,t.id DESC",
-      user,
-      payments.mode,
-      payments.scope(),
-      payments.mode,
-      payments.scope()
+        " AND (t.status NOT IN ('COMPLETED','REFUNDED') OR (t.status='COMPLETED' AND NOT EXISTS (SELECT 1 FROM trainings newer WHERE newer.user_id=t.user_id AND newer.project_id=t.project_id AND newer.status<>'REFUNDED' AND (newer.created_at>t.created_at OR (newer.created_at=t.created_at AND newer.id>t.id))))) ORDER BY t.created_at DESC,t.id DESC",
+      user
     );
     return Map.of(
       "items",
@@ -59,7 +51,7 @@ final class TrainingCatalog {
     ) throw error(400, "分页或筛选参数不正确");
     String filter = "";
     var args = new ArrayList<Object>(
-      List.of(user, payments.mode, payments.scope())
+      List.of(user)
     );
     if (!key.isBlank()) {
       filter += " AND (t.history_key=? OR t.project_id=?)";
@@ -78,7 +70,7 @@ final class TrainingCatalog {
     args.add(limit);
     args.add(offset);
     var rows = s.db.queryForList(
-      "SELECT t.*,o.status AS source_order_status" +
+      "SELECT t.*" +
         TrainingHistory.SCOPED +
         filter +
         " ORDER BY t.created_at DESC,t.id DESC LIMIT ? OFFSET ?",
@@ -100,9 +92,7 @@ final class TrainingCatalog {
           " WHERE",
           " JOIN projects pr ON pr.id=t.project_id WHERE"
         ),
-      user,
-      payments.mode,
-      payments.scope()
+      user
     );
     var result = new TreeMap<String, Map<String, String>>();
     for (var row : rows) {
@@ -128,11 +118,11 @@ final class TrainingCatalog {
 
   List<Map<String, Object>> all(String user, boolean summary, String project) {
     var args = new ArrayList<Object>(
-      List.of(user, payments.mode, payments.scope())
+      List.of(user)
     );
     if (!project.isBlank()) args.add(project);
     var rows = s.db.queryForList(
-      "SELECT t.*,o.status AS source_order_status" +
+      "SELECT t.*" +
         TrainingHistory.SCOPED +
         (project.isBlank() ? "" : " AND t.project_id=?") +
         " ORDER BY t.created_at DESC,t.id DESC",
@@ -147,14 +137,6 @@ final class TrainingCatalog {
     boolean summary,
     boolean complete
   ) {
-    var packs = payments.packages(user);
-    var byPackage = new HashMap<String, Map<String, Object>>();
-    for (var pack : packs) byPackage.put(str(pack, "id"), pack);
-    boolean shared = packs
-      .stream()
-      .anyMatch(
-        p -> !PaymentService.legacy(p) && PaymentService.available(p, "RETEST")
-      );
     var children = new HashMap<String, List<Map<String, Object>>>();
     var relatedRows = rows;
     if (!complete) {
@@ -168,7 +150,7 @@ final class TrainingCatalog {
         .toList();
       if (!parentIds.isEmpty()) {
         var args = new ArrayList<Object>(
-          List.of(user, payments.mode, payments.scope())
+          List.of(user)
         );
         args.addAll(parentIds);
         relatedRows = s.db.queryForList(
@@ -215,7 +197,6 @@ final class TrainingCatalog {
       item.put("status", row.get("status"));
       item.put("createdAt", row.get("created_at"));
       item.put("leaseUntil", row.get("lease_until"));
-      item.put("packageId", row.get("package_id"));
       if (row.get("history_key") != null) item.put(
         "historyKey",
         row.get("history_key")
@@ -223,35 +204,8 @@ final class TrainingCatalog {
       if (
         "DEEP".equals(row.get("kind")) && "COMPLETED".equals(row.get("status"))
       ) {
-        var entry = new LinkedHashMap<String, Object>();
-        entry.put("packageId", row.get("package_id"));
-        var pack = byPackage.get(str(row, "package_id"));
         var related = children.getOrDefault(str(row, "id"), List.of());
-        var active = related
-          .stream()
-          .filter(c -> !"REFUNDED".equals(c.get("status")))
-          .findFirst();
-        if (
-          !"PAID".equals(row.get("source_order_status")) || pack == null
-        ) entry.put("state", "UNAVAILABLE");
-        else if (active.isPresent()) {
-          var child = active.get();
-          entry.put(
-            "state",
-            "COMPLETED".equals(child.get("status")) ? "COMPLETED" : "CONTINUE"
-          );
-          entry.put("trainingId", child.get("id"));
-          entry.put("trainingStatus", child.get("status"));
-          entry.put("packageId", child.get("package_id"));
-        } else {
-          boolean available =
-            PaymentService.available(pack, "RETEST") &&
-            (!PaymentService.legacy(pack) ||
-              row.get("id").equals(pack.get("deep_training_id")));
-          entry.put("state", available || shared ? "AVAILABLE" : "UNAVAILABLE");
-          entry.put("returned", !related.isEmpty());
-        }
-        item.put("retestEntry", entry);
+        item.put("retestEntry", TrainingService.retestEntry(related));
       }
       result.add(item);
     }

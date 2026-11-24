@@ -17,8 +17,6 @@ import org.springframework.web.server.ResponseStatusException;
     "spring.datasource.username=${PROBE_TEST_DB_USER:sa}",
     "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
-    "app.payment.reconcile-enabled=false",
   }
 )
 class RetestRegressionTest {
@@ -31,9 +29,6 @@ class RetestRegressionTest {
 
   @Autowired
   TrainingService trainings;
-
-  @Autowired
-  PaymentService payments;
 
   @Autowired
   ModelService model;
@@ -67,9 +62,6 @@ class RetestRegressionTest {
     );
     p = projects.extract(u, str(p, "id"));
     p = projects.confirm(u, str(p, "id"), p);
-    var legacyOrder = payments.create(u, Map.of("requestKey", id()));
-    s.db.update("UPDATE purchase_orders SET product_code='LEGACY_PAIR',training_limit=2 WHERE id=?", legacyOrder.get("id"));
-    payments.mock(u, str(legacyOrder, "id"));
     var deep = trainings.start(
       u,
       Map.of("projectId", p.get("id"), "requestKey", id())
@@ -232,24 +224,21 @@ class RetestRegressionTest {
     );
     active.put("operation", "QUESTION");
     trainings.update(tid, "FAILED", active);
-    trainings.refund(f.user, tid);
     var entry = (Map<?, ?>) trainings
       .get(f.user, str(f.deep, "id"))
       .get("retestEntry");
-    assertEquals("AVAILABLE", entry.get("state"));
-    assertEquals(true, entry.get("returned"));
+    assertEquals("CONTINUE", entry.get("state"));
     var again = trainings.start(f.user, input(f, id()));
-    assertNotEquals(tid, again.get("id"));
+    assertEquals(tid, again.get("id"));
     assertEquals(
       "本轮原回答需保存",
       list(trainings.get(f.user, tid), "turns").get(0).get("answer")
     );
     assertEquals(
-      2,
+      1,
       s.db.queryForObject(
-        "SELECT COUNT(*) FROM entitlement_events WHERE package_id=? AND event_type='RESERVED' AND training_id<>?",
+        "SELECT COUNT(*) FROM trainings WHERE parent_id=?",
         Integer.class,
-        again.get("packageId"),
         f.deep.get("id")
       )
     );
@@ -285,7 +274,7 @@ class RetestRegressionTest {
   }
 
   @Test
-  void completedEntryAndExactParentPackageAssociation() {
+  void completedEntryBelongsToItsParentTraining() {
     var f = scenario("验证方法");
     var t = trainings.start(f.user, input(f, id()));
     trainings.finish(f.user, str(t, "id"));
@@ -297,10 +286,6 @@ class RetestRegressionTest {
     assertEquals(
       t.get("id"),
       trainings.start(f.user, input(f, id())).get("id")
-    );
-    payments.mock(
-      f.user,
-      str(payments.create(f.user, Map.of("requestKey", id())), "id")
     );
     var other = trainings.start(
       f.user,

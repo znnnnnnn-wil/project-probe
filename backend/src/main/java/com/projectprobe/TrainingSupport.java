@@ -24,6 +24,7 @@ class TrainingSupport {
       var turns = list(body, "turns");
       if (!"ACTIVE".equals(row.get("status")) || turns.isEmpty() ||
           !turnId.equals(turns.get(turns.size() - 1).get("id"))) throw error(409, "当前问题已变化，请刷新");
+      TrainingService.requireQuestionVersion(turns.get(turns.size() - 1), input);
       if (events.size() >= 20) throw error(429, "本轮辅助操作次数已达上限");
       if (!kind.equals("FEEDBACK") && events.stream().filter(e ->
           turnId.equals(e.get("turnId")) && !"FEEDBACK".equals(e.get("kind"))).count() >= 3)

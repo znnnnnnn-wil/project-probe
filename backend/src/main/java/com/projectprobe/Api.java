@@ -12,35 +12,32 @@ public class Api {
   final Auth auth;
   final ProjectService projects;
   final TrainingService trainings;
-  final PaymentService payments;
   final ModelService model;
-  final PaymentOperations paymentOperations;
   final InputService inputs;
   final TrainingSupport support;
   final AnswerDrafts drafts;
+  final InterviewSpeech speech;
 
   Api(
     Store s,
     Auth auth,
     ProjectService projects,
     TrainingService trainings,
-    PaymentService payments,
     ModelService model,
-    PaymentOperations paymentOperations,
     InputService inputs,
     TrainingSupport support,
-    AnswerDrafts drafts
+    AnswerDrafts drafts,
+    InterviewSpeech speech
   ) {
     this.s = s;
     this.auth = auth;
     this.projects = projects;
     this.trainings = trainings;
-    this.payments = payments;
     this.model = model;
-    this.paymentOperations = paymentOperations;
     this.inputs = inputs;
     this.support = support;
     this.drafts = drafts;
+    this.speech = speech;
   }
 
   @GetMapping("/health")
@@ -48,19 +45,30 @@ public class Api {
     return Map.of("status", "ok");
   }
 
+  @GetMapping("/ready")
+  Object ready() {
+    try { s.db.queryForObject("SELECT 1", Integer.class); }
+    catch (Exception e) { throw Store.error(503, "数据库暂不可用，请稍后重试"); }
+    return Map.of("status", "ready", "modelMode", model.mode, "modelCapacity", model.capacity());
+  }
+
   @GetMapping("/config")
   Object config() {
     return Map.of(
       "modelMode",
       model.mode,
+      "modelQualityReviewEnabled",
+      model.mode.equals("live") && model.qualityReviewEnabled,
+      "modelEvidenceSpansRequired",
+      model.mode.equals("live") && model.evidenceSpansRequired,
       "modelName",
       model.mode.equals("live") ? model.model : "",
-      "paymentMode",
-      payments.mode,
-      "paymentConfigured",
-      payments.configured(),
       "speechEnabled",
       inputs.speechReady(),
+      "realtimeSpeechEnabled",
+      inputs.realtimeSpeechReady(),
+      "ttsEnabled",
+      speech.ttsReady(),
       "resumeImportEnabled",
       model.mode.equals("live")
     );
@@ -107,6 +115,14 @@ public class Api {
     return projects.save(auth.user(r), null, b);
   }
 
+  @PostMapping("/projects/batch")
+  Object createProjects(
+    HttpServletRequest r,
+    @RequestBody Map<String, Object> b
+  ) {
+    return projects.createBatch(auth.user(r), b);
+  }
+
   @PutMapping("/projects/{id}")
   Object saveProject(
     HttpServletRequest r,
@@ -137,6 +153,7 @@ public class Api {
     HttpServletRequest r,
     @PathVariable String id,
     @RequestParam("turnId") String turnId,
+    @RequestParam(defaultValue = "0") int questionVersion,
     @RequestParam("file") org.springframework.web.multipart.MultipartFile file
   ) {
     String user = auth.user(r);
@@ -148,7 +165,8 @@ public class Api {
       !turnId.equals(turns.get(turns.size() - 1).get("id")) ||
       !Store.str(turns.get(turns.size() - 1), "answer").isBlank()
     ) throw Store.error(409, "本题已结束，请重新加载当前问题");
-    return inputs.transcribe(user, file);
+    TrainingService.requireQuestionVersion(turns.get(turns.size() - 1), Map.of("questionVersion", questionVersion));
+    return inputs.transcribe(file);
   }
 
   @PostMapping("/projects/{id}/confirm")
@@ -167,7 +185,7 @@ public class Api {
     @RequestParam(defaultValue = "") String project
   ) {
     if (project.length() > 36) throw Store.error(400, "项目筛选参数不正确");
-    return new TrainingCatalog(s, payments).all(auth.user(r), summary, project);
+    return new TrainingCatalog(s).all(auth.user(r), summary, project);
   }
 
   @GetMapping("/trainings/{id}")
@@ -183,7 +201,7 @@ public class Api {
     @RequestParam(defaultValue = "") String key,
     @RequestParam(defaultValue = "") String project
   ) {
-    return new TrainingCatalog(s, payments).page(
+    return new TrainingCatalog(s).page(
       auth.user(r),
       offset,
       limit,
@@ -194,12 +212,12 @@ public class Api {
 
   @GetMapping("/training-overview")
   Object trainingOverview(HttpServletRequest r) {
-    return new TrainingCatalog(s, payments).overview(auth.user(r));
+    return new TrainingCatalog(s).overview(auth.user(r));
   }
 
   @GetMapping("/training-projects")
   Object trainingProjects(HttpServletRequest r) {
-    return new TrainingCatalog(s, payments).choices(auth.user(r));
+    return new TrainingCatalog(s).choices(auth.user(r));
   }
 
   @PostMapping("/trainings")
@@ -250,69 +268,4 @@ public class Api {
     return trainings.generate(auth.user(r), id);
   }
 
-  @PostMapping("/trainings/{id}/refund")
-  Object refund(HttpServletRequest r, @PathVariable String id) {
-    return trainings.refund(auth.user(r), id);
-  }
-
-  @GetMapping("/shop")
-  Object shop(
-    HttpServletRequest r,
-    @RequestParam(defaultValue = "false") boolean summary
-  ) {
-    return payments.shop(auth.user(r), summary);
-  }
-
-  @PostMapping("/orders")
-  Object order(HttpServletRequest r, @RequestBody Map<String, Object> b) {
-    return payments.create(auth.user(r), b);
-  }
-
-  @PostMapping("/orders/{id}/mock-pay")
-  Object mock(HttpServletRequest r, @PathVariable String id) {
-    return payments.mock(auth.user(r), id);
-  }
-
-  @PostMapping("/orders/{id}/checkout")
-  Object checkout(HttpServletRequest r, @PathVariable String id) {
-    return Map.of("formHtml", payments.checkout(auth.user(r), id));
-  }
-
-  @PostMapping("/orders/{id}/sync")
-  Object sync(HttpServletRequest r, @PathVariable String id) {
-    return payments.sync(auth.user(r), id);
-  }
-
-  @PostMapping("/orders/{id}/close")
-  Object closeOrder(HttpServletRequest r, @PathVariable String id) {
-    return paymentOperations.close(auth.user(r), id);
-  }
-
-  @PostMapping("/orders/{id}/cash-refund")
-  Object cashRefund(HttpServletRequest r, @PathVariable String id) {
-    return paymentOperations.refund(auth.user(r), id);
-  }
-
-  @PostMapping("/orders/{id}/refund-query")
-  Object refundQuery(HttpServletRequest r, @PathVariable String id) {
-    return paymentOperations.refundQuery(auth.user(r), id);
-  }
-
-  @GetMapping("/orders/{id}")
-  Object orderStatus(HttpServletRequest r, @PathVariable String id) {
-    return payments.order(auth.user(r), id);
-  }
-
-  @PostMapping(value = "/payments/notify", produces = "text/plain")
-  String notify(
-    @RequestParam org.springframework.util.MultiValueMap<String, String> params
-  ) {
-    if (
-      params
-        .values()
-        .stream()
-        .anyMatch(v -> v.size() != 1)
-    ) return "failure";
-    return payments.notify(params.toSingleValueMap());
-  }
 }

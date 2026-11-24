@@ -11,7 +11,7 @@ class FeedbackService {
   Map<String, Object> submit(String user, Map<String, Object> input, String training) {
     String kind = required(input, "kind", 20), detail = required(input, "detail", 2000), key = required(input, "requestKey", 100);
     String request = str(input, "requestId");
-    if (!Set.of("GENERAL", "PAYMENT", "ACCOUNT", "QUESTION").contains(kind) || (!request.isBlank() && !request.matches("[a-f0-9-]{36}"))) throw error(400, "反馈类型或请求编号不正确");
+    if (!Set.of("GENERAL", "ACCOUNT", "QUESTION").contains(kind) || (!request.isBlank() && !request.matches("[a-f0-9-]{36}"))) throw error(400, "反馈类型或请求编号不正确");
     return s.locked(user, () -> {
       var old = s.db.queryForList("SELECT id FROM user_feedback WHERE user_id=? AND request_key=?", user, key);
       if (!old.isEmpty()) return Map.of("id", old.get(0).get("id"));

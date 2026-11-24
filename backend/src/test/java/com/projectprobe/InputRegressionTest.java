@@ -7,6 +7,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 import java.io.*;
+import java.net.http.*;
 import java.nio.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -24,9 +25,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest(
   properties = {
+    "app.origin=http://localhost:5173",
     "spring.datasource.url=jdbc:h2:mem:input-tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
     "app.speech-enabled=false",
   }
 )
@@ -49,10 +50,13 @@ class InputRegressionTest {
   ProjectService projects;
 
   @Autowired
-  PaymentService payments;
+  ProjectPractice practice;
 
   @Autowired
   TrainingService trainings;
+
+  @Autowired
+  TrainingSupport support;
 
   String user() {
     String id = id();
@@ -110,30 +114,18 @@ class InputRegressionTest {
   }
 
   @Test
-  void exhaustedParsingQuotaRejectsBeforeReadingDocument() throws Exception {
+  void oldParsingAndRecognitionCountsDoNotBlockResume() {
     String user = user();
-    var upload = spy(
-      file(
-        "resume.txt",
-        "合成项目简历，我负责接口和测试，尚未执行压测。".getBytes(
-          StandardCharsets.UTF_8
-        )
-      )
-    );
-    s.db.update(
-      "INSERT INTO input_limits(user_id,kind,window_start,attempts) VALUES (?,'RESUME_PARSE',?,60)",
-      user,
-      now()
-    );
-    assertEquals(
-      429,
-      assertThrows(ResponseStatusException.class, () ->
-        inputs.resume(user, upload)
-      )
-        .getStatusCode()
-        .value()
-    );
-    verify(upload, never()).getBytes();
+    for (String kind : List.of("RESUME_PARSE", "RESUME")) {
+      s.db.update("INSERT INTO input_limits(user_id,kind,window_start,attempts,lease_until) VALUES (?,?,?,100,?)",
+        user, kind, now(), now() + 90_000);
+    }
+    var model = resumeModel("model-a");
+    doReturn(Map.of("projects", List.of(candidate()))).when(model).call(anyString(), any());
+    var service = new InputService(s, model);
+    for (int i = 0; i < 61; i++)
+      assertEquals(false, service.resume(user, resumeFile("resume.txt", "合成材料版本 " + i)).get("duplicate"));
+    verify(model, times(61)).call(anyString(), any());
   }
 
   @Test
@@ -276,7 +268,7 @@ class InputRegressionTest {
   }
 
   @Test
-  void repeatedResumeAcrossInstancesAndRenamingDoesNotConsumeQuota() {
+  void repeatedResumeAcrossInstancesAndRenamingUsesCachedResult() {
     String user = user();
     var model = resumeModel("model-a");
     doReturn(Map.of("projects", List.of(candidate())))
@@ -285,10 +277,6 @@ class InputRegressionTest {
     var service = new InputService(s, model);
     var first = service.resume(user, resumeFile("first.txt", ""));
     assertEquals(false, first.get("duplicate"));
-    s.db.update(
-      "UPDATE input_limits SET attempts=10 WHERE user_id=? AND kind='RESUME'",
-      user
-    );
     var second = new InputService(s, model).resume(
       user,
       file(
@@ -302,14 +290,6 @@ class InputRegressionTest {
     assertEquals(first.get("projects"), second.get("projects"));
     assertEquals(first.get("recognizedAt"), second.get("recognizedAt"));
     verify(model, times(1)).call(anyString(), any());
-    assertEquals(
-      10,
-      s.db.queryForObject(
-        "SELECT attempts FROM input_limits WHERE user_id=? AND kind='RESUME'",
-        Integer.class,
-        user
-      )
-    );
   }
 
   @Test
@@ -404,14 +384,17 @@ class InputRegressionTest {
   }
 
   @Test
-  void concurrentResumeAcrossInstancesCallsModelOnce() throws Exception {
+  void concurrentResumeAcrossInstancesOnlyDeduplicatesIdenticalDocuments() throws Exception {
     String user = user();
     var model = resumeModel("model-a");
     var entered = new CountDownLatch(1);
     var exit = new CountDownLatch(1);
+    var calls = new java.util.concurrent.atomic.AtomicInteger();
     doAnswer(invocation -> {
-      entered.countDown();
-      assertTrue(exit.await(5, TimeUnit.SECONDS));
+      if (calls.incrementAndGet() == 1) {
+        entered.countDown();
+        assertTrue(exit.await(8, TimeUnit.SECONDS));
+      }
       return Map.of("projects", List.of(candidate()));
     })
       .when(model)
@@ -430,6 +413,7 @@ class InputRegressionTest {
           .getStatusCode()
           .value()
       );
+      assertEquals(false, new InputService(s, model).resume(user, resumeFile("different.txt", "不同材料")).get("duplicate"));
       exit.countDown();
       assertEquals(false, first.get(5, TimeUnit.SECONDS).get("duplicate"));
       assertEquals(
@@ -438,11 +422,11 @@ class InputRegressionTest {
           .resume(user, resumeFile("third.txt", ""))
           .get("duplicate")
       );
-      verify(model, times(1)).call(anyString(), any());
+      verify(model, times(2)).call(anyString(), any());
       assertEquals(
-        1,
+        0,
         s.db.queryForObject(
-          "SELECT attempts FROM input_limits WHERE user_id=? AND kind='RESUME'",
+          "SELECT COUNT(*) FROM material_jobs WHERE user_id=?",
           Integer.class,
           user
         )
@@ -461,12 +445,12 @@ class InputRegressionTest {
       var model = resumeModel("model-a");
       doAnswer(invocation -> {
         if (superseded) s.db.update(
-          "UPDATE input_limits SET lease_token=? WHERE user_id=? AND kind='RESUME'",
+          "UPDATE material_jobs SET token=? WHERE user_id=? AND kind='RESUME'",
           newToken,
           user
         );
         else s.db.update(
-          "UPDATE input_limits SET lease_until=0 WHERE user_id=? AND kind='RESUME'",
+          "UPDATE material_jobs SET expires_at=0 WHERE user_id=? AND kind='RESUME'",
           user
         );
         return Map.of("projects", List.of(candidate()));
@@ -488,10 +472,10 @@ class InputRegressionTest {
         newToken,
         s
           .one(
-            "SELECT lease_token FROM input_limits WHERE user_id=? AND kind='RESUME'",
+            "SELECT token FROM material_jobs WHERE user_id=? AND kind='RESUME'",
             user
           )
-          .get("lease_token")
+          .get("token")
       );
     }
   }
@@ -523,34 +507,6 @@ class InputRegressionTest {
       0,
       s.db.queryForObject(
         "SELECT COUNT(*) FROM resume_import_cache WHERE user_id=?",
-        Integer.class,
-        user
-      )
-    );
-  }
-
-  @Test
-  void cacheAppearingDuringClaimSkipsOperationAndQuota() {
-    String user = user();
-    var reads = new java.util.concurrent.atomic.AtomicInteger();
-    assertEquals(
-      "cached",
-      inputs.limited(
-        user,
-        "TEST",
-        1,
-        () -> reads.incrementAndGet() == 1 ? null : "cached",
-        () -> {
-          fail("must not call model");
-          return "unused";
-        },
-        result -> fail("must not overwrite cache")
-      )
-    );
-    assertEquals(
-      0,
-      s.db.queryForObject(
-        "SELECT COUNT(*) FROM input_limits WHERE user_id=?",
         Integer.class,
         user
       )
@@ -840,98 +796,45 @@ class InputRegressionTest {
   void disabledSpeechDoesNotCallProvider() {
     assertFalse(inputs.speechReady());
     assertThrows(ResponseStatusException.class, () ->
-      inputs.transcribe(user(), file("x.wav", wav(16000, 1)))
+      inputs.transcribe(file("x.wav", wav(16000, 1)))
     );
   }
 
   @Test
-  void limitsCallsAndReleasesFailedLease() {
+  @SuppressWarnings("unchecked")
+  void recordingTranscriptionAcceptsOverlappingCallsAndIgnoresOldCounters() throws Exception {
     String user = user();
-    assertThrows(IllegalStateException.class, () ->
-      inputs.limited(user, "TEST", 2, () -> {
-        throw new IllegalStateException();
-      })
-    );
-    assertEquals("ok", inputs.limited(user, "TEST", 2, () -> "ok"));
-    assertEquals(
-      429,
-      assertThrows(ResponseStatusException.class, () ->
-        inputs.limited(user, "TEST", 2, () -> "no")
-      )
-        .getStatusCode()
-        .value()
-    );
-    assertEquals(
-      0L,
-      (
-        (Number) s
-          .one(
-            "SELECT lease_until FROM input_limits WHERE user_id=? AND kind='TEST'",
-            user
-          )
-          .get("lease_until")
-      ).longValue()
-    );
-  }
-
-  @Test
-  void concurrentSameUserCannotObtainTwoLeases() throws Exception {
-    String user = user();
-    var entered = new CountDownLatch(1);
-    var exit = new CountDownLatch(1);
-    var pool = Executors.newSingleThreadExecutor();
+    s.db.update("INSERT INTO input_limits(user_id,kind,window_start,attempts,lease_until) VALUES (?,'SPEECH',?,?,?)",
+      user, now(), Integer.MAX_VALUE, now() + 90_000);
+    var service = spy(new InputService(s, inputs.model));
+    doReturn(true).when(service).speechReady();
+    service.speechUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+    service.speechModel = "qwen3-asr-flash";
+    service.speechKey = "synthetic-test-key";
+    var client = mock(HttpClient.class);
+    HttpResponse<String> response = mock(HttpResponse.class);
+    when(response.statusCode()).thenReturn(200);
+    when(response.body()).thenReturn("{\"choices\":[{\"message\":{\"content\":\"合成转写\"}}]}");
+    var entered = new CountDownLatch(3);
+    var release = new CountDownLatch(1);
+    when(client.send(any(HttpRequest.class), any(HttpResponse.BodyHandler.class))).thenAnswer(call -> {
+      entered.countDown();
+      assertTrue(release.await(8, TimeUnit.SECONDS));
+      return response;
+    });
+    org.springframework.test.util.ReflectionTestUtils.setField(service, "client", client);
+    var pool = Executors.newFixedThreadPool(3);
     try {
-      var first = pool.submit(() ->
-        inputs.limited(user, "TEST", 10, () -> {
-          entered.countDown();
-          try {
-            exit.await(5, TimeUnit.SECONDS);
-          } catch (Exception e) {
-            throw new RuntimeException(e);
-          }
-          return "ok";
-        })
-      );
+      var requests = new ArrayList<Future<Map<String, Object>>>();
+      for (int i = 0; i < 3; i++) requests.add(pool.submit(() -> service.transcribe(file("answer.wav", wav(16000, 1)))));
       assertTrue(entered.await(5, TimeUnit.SECONDS));
-      assertEquals(
-        409,
-        assertThrows(ResponseStatusException.class, () ->
-          inputs.limited(user, "TEST", 10, () -> "no")
-        )
-          .getStatusCode()
-          .value()
-      );
-      exit.countDown();
-      assertEquals("ok", first.get(5, TimeUnit.SECONDS));
+      release.countDown();
+      for (var request : requests) assertEquals("合成转写", request.get(5, TimeUnit.SECONDS).get("text"));
     } finally {
-      exit.countDown();
+      release.countDown();
       pool.shutdownNow();
     }
-  }
-
-  @Test
-  void staleLeaseCannotReturnOrClearNewOwner() {
-    String user = user();
-    String newToken = id();
-    assertThrows(ResponseStatusException.class, () ->
-      inputs.limited(user, "TEST", 10, () -> {
-        s.db.update(
-          "UPDATE input_limits SET lease_token=? WHERE user_id=? AND kind='TEST'",
-          newToken,
-          user
-        );
-        return "stale";
-      })
-    );
-    assertEquals(
-      newToken,
-      s
-        .one(
-          "SELECT lease_token FROM input_limits WHERE user_id=? AND kind='TEST'",
-          user
-        )
-        .get("lease_token")
-    );
+    assertEquals(Integer.MAX_VALUE, s.one("SELECT attempts FROM input_limits WHERE user_id=? AND kind='SPEECH'", user).get("attempts"));
   }
 
   @Test
@@ -983,8 +886,6 @@ class InputRegressionTest {
         Map.of("version", project.get("version"), "facts", project.get("facts"))
       )
     );
-    var order = payments.create(owner, Map.of("requestKey", id()));
-    payments.mock(owner, str(order, "id"));
     var training = trainings.start(
       owner,
       Map.of("projectId", project.get("id"), "requestKey", id())
@@ -1009,6 +910,15 @@ class InputRegressionTest {
           .header("Origin", "http://localhost:5173")
       )
       .andExpect(status().isServiceUnavailable());
+    support.submit(owner, trainingId, Map.of("turnId", turnId, "kind", "CLARIFY", "requestKey", id()));
+    mvc.perform(multipart("/api/trainings/" + trainingId + "/transcribe")
+        .file(file("x.wav", wav(16000, 1))).param("turnId", turnId)
+        .cookie(cookie).header("Origin", "http://localhost:5173"))
+      .andExpect(status().isConflict());
+    mvc.perform(multipart("/api/trainings/" + trainingId + "/transcribe")
+        .file(file("x.wav", wav(16000, 1))).param("turnId", turnId).param("questionVersion", "1")
+        .cookie(cookie).header("Origin", "http://localhost:5173"))
+      .andExpect(status().isServiceUnavailable());
     var other = new org.springframework.mock.web.MockHttpServletResponse();
     auth.login(
       Map.of(
@@ -1029,5 +939,131 @@ class InputRegressionTest {
           .header("Origin", "http://localhost:5173")
       )
       .andExpect(status().isNotFound());
+  }
+
+  @Test
+  void practiceSpeechEndpointRequiresAnUnansweredTurnOwnedByTheUser() throws Exception {
+    String origin = "http://localhost:5173";
+    var ownerResponse = new org.springframework.mock.web.MockHttpServletResponse();
+    var otherResponse = new org.springframework.mock.web.MockHttpServletResponse();
+    String owner = str(auth.login(Map.of("username", "practice-asr-" + id(), "password", "synthetic-input-password"), true, ownerResponse), "id");
+    auth.login(Map.of("username", "practice-asr-" + id(), "password", "synthetic-input-password"), true, otherResponse);
+    String projectId = str(projects.save(owner, null, Map.of("name", "合成项目", "responsibility", "我负责接口")), "id");
+    String url = "/api/projects/" + projectId + "/practice/transcribe";
+    var recording = file("answer.wav", wav(16000, 7));
+    var ownerCookie = ownerResponse.getCookie("probe_session");
+
+    mvc.perform(multipart(url).file(recording).param("turnId", id()).header("Origin", origin))
+      .andExpect(status().isUnauthorized());
+    mvc.perform(multipart(url).file(recording).param("turnId", id()).cookie(ownerCookie).header("Origin", origin))
+      .andExpect(status().isConflict());
+
+    var current = practice.run(owner, projectId, Map.of());
+    String turnId = str(list(current, "turns").get(0), "id");
+    mvc.perform(multipart(url).file(recording).param("turnId", turnId)
+        .cookie(otherResponse.getCookie("probe_session")).header("Origin", origin))
+      .andExpect(status().isNotFound());
+    mvc.perform(multipart(url).file(recording).param("turnId", id()).cookie(ownerCookie).header("Origin", origin))
+      .andExpect(status().isConflict());
+    mvc.perform(multipart(url).file(recording).content(recording.getBytes())
+        .param("turnId", turnId).cookie(ownerCookie).header("Origin", origin))
+      .andExpect(status().isServiceUnavailable());
+    assertEquals(current, practice.get(owner, projectId));
+
+    practice.run(owner, projectId, Map.of("turnId", turnId, "answer", "这是一条已提交的合成回答。"));
+    mvc.perform(multipart(url).file(recording).param("turnId", turnId).cookie(ownerCookie).header("Origin", origin))
+      .andExpect(status().isConflict());
+  }
+
+  @Test
+  void practiceTtsTeachesWithinTheCurrentTurnUntilLearningIsConfirmed() {
+    String user = user();
+    String project = str(projects.save(user, null, Map.of("name", "合成项目", "responsibility", "我负责接口")), "id");
+    var service = new ProjectPractice(s, projects, practice.model);
+    service.maxTurns = 2;
+    service.journey = practice.journey;
+    var state = service.run(user, project, Map.of());
+    var first = list(state, "turns").get(0);
+    String firstId = str(first, "id");
+    assertEquals(first.get("question"), service.speechPrompt(user, project, firstId, 0));
+    state = service.run(user, project, Map.of("turnId", firstId, "dialogue", true, "exchangeCount", 0, "answer", "不会"));
+    assertEquals(1, list(state, "turns").size());
+    String explanation = str(list(state, "turns").get(0), "explanation");
+    assertEquals(explanation, service.speechPrompt(user, project, firstId, 1));
+    assertEquals(explanation, service.speechPrompt(user, project, firstId, null));
+    assertEquals(firstId, service.requireUnansweredTurn(user, project, firstId, 1).get("id"));
+    for (Object staleCount : List.of(0, -1, 0.5, "1"))
+      assertEquals(409, assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, firstId, staleCount)).getStatusCode().value());
+    assertEquals(404, assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user(), project, firstId, 1)).getStatusCode().value());
+
+    var speech = spy(new InterviewSpeech(s, inputs.model, service));
+    doReturn(true).when(speech).ttsReady();
+    doNothing().when(speech).synthesize(anyString(), any());
+    var response = new org.springframework.mock.web.MockHttpServletResponse();
+    speech.speak(user, project, firstId, 1, response);
+    verify(speech).synthesize(explanation, response);
+    assertEquals(state, service.get(user, project));
+
+    state = service.run(user, project, Map.of("turnId", firstId, "dialogue", true, "exchangeCount", 1, "answer", "我学会了"));
+    var next = list(state, "turns").get(1);
+    String nextId = str(next, "id");
+    assertEquals(next.get("question"), service.speechPrompt(user, project, nextId, 0));
+    assertFalse(next.containsKey("explanation"));
+    assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, firstId, 2));
+    state = service.run(user, project, Map.of("turnId", nextId, "dialogue", true, "exchangeCount", 0, "answer", "求答案"));
+    assertEquals("ACTIVE", state.get("status"));
+    String finalExplanation = str(list(state, "turns").get(1), "explanation");
+    assertEquals(finalExplanation, service.speechPrompt(user, project, nextId, 1));
+    var finalResponse = new org.springframework.mock.web.MockHttpServletResponse();
+    speech.speak(user, project, nextId, 1, finalResponse);
+    speech.speak(user, project, nextId, 1, finalResponse);
+    verify(speech, times(2)).synthesize(finalExplanation, finalResponse);
+    state = service.run(user, project, Map.of("turnId", nextId, "dialogue", true, "exchangeCount", 1, "answer", "明白了"));
+    assertEquals("COMPLETED", state.get("status"));
+    assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, nextId, 2));
+    assertThrows(ResponseStatusException.class, () -> service.requireUnansweredTurn(user, project, nextId, 2));
+    service.run(user, project, Map.of("restart", true, "roundId", state.get("roundId")));
+    assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, nextId, null));
+  }
+
+  @Test
+  void completedPracticeWithoutTeachingAndFailedGenerationCannotBeSpoken() {
+    String user = user();
+    String project = str(projects.save(user, null, Map.of("name", "合成项目", "responsibility", "我负责接口")), "id");
+    var service = new ProjectPractice(s, projects, practice.model);
+    service.maxTurns = 1;
+    service.journey = practice.journey;
+    var state = service.run(user, project, Map.of());
+    String turnId = str(list(state, "turns").get(0), "id");
+    state = service.run(user, project, Map.of("turnId", turnId, "answer", "接口使用唯一键。"));
+    assertEquals("COMPLETED", state.get("status"));
+    assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, turnId, 0));
+    list(state, "turns").get(0).put("explanation", "仅用于测试的讲解");
+    for (String status : List.of("FAILED", "GENERATING", "CANCELLED")) {
+      s.db.update("UPDATE project_practice_rounds SET status=?,body=?,lease_until=? WHERE user_id=? AND round_id=?",
+        status, s.encode(state), now() + 90000, user, state.get("roundId"));
+      assertEquals(409, assertThrows(ResponseStatusException.class, () -> service.speechPrompt(user, project, turnId, 0)).getStatusCode().value());
+    }
+  }
+
+  @Test
+  void ttsKeepsTextValidationAndIgnoresPreviousDailyQuota() {
+    String user = user(), project = id(), turn = id();
+    var service = mock(ProjectPractice.class);
+    var speech = spy(new InterviewSpeech(s, inputs.model, service));
+    doReturn(true).when(speech).ttsReady();
+    doNothing().when(speech).synthesize(anyString(), any());
+    var response = new org.springframework.mock.web.MockHttpServletResponse();
+    String text = "讲".repeat(650);
+    when(service.speechPrompt(user, project, turn, 0)).thenReturn(text);
+    s.db.update("INSERT INTO input_limits(user_id,kind,window_start,attempts,lease_until) VALUES (?,'TTS',?,60,?)",
+      user, now(), now() + 90_000);
+    for (int i = 0; i < 61; i++) speech.speak(user, project, turn, 0, response);
+    verify(speech, times(61)).synthesize(text, response);
+    for (String invalid : List.of("讲".repeat(651), " ")) {
+      when(service.speechPrompt(user, project, turn, 0)).thenReturn(invalid);
+      assertEquals(409, assertThrows(ResponseStatusException.class, () -> speech.speak(user, project, turn, 0, response)).getStatusCode().value());
+    }
+    verify(speech, times(61)).synthesize(anyString(), any());
   }
 }

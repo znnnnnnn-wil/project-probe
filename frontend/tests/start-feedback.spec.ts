@@ -1,14 +1,16 @@
 import { test, expect } from "@playwright/test";
 import { demoProject } from "../src/api";
+import { mockPracticeVoice } from "./practice-voice-fixture";
 
 for (const viewport of [
   { width: 1440, height: 900 },
   { width: 390, height: 844 },
 ]) {
-  test(`底部开始失败可见，取得权益后可继续 ${viewport.width}`, async ({
+  test(`练习首题请求失败时显示原因并可重试 ${viewport.width}`, async ({
     page,
   }) => {
     await page.setViewportSize(viewport);
+    await mockPracticeVoice(page, () => "合成语音回答");
     const headers = {
       Origin: new URL(test.info().project.use.baseURL!).origin,
     };
@@ -23,25 +25,29 @@ for (const viewport of [
       username: "start-feedback-" + crypto.randomUUID(),
       password: "synthetic-test-password",
     });
-    let project = await post("/projects", demoProject);
-    project = await post("/projects/" + project.id + "/extract");
-    await post("/projects/" + project.id + "/confirm", {
-      version: project.version,
-      facts: project.facts,
+    const project = await post("/projects", demoProject);
+    const reason = "练习首题暂时无法生成，请重试";
+    let attempts = 0;
+    await page.route(`**/api/projects/${project.id}/practice`, (route) => {
+      if (route.request().method() === "POST" && ++attempts === 1) {
+        return route.fulfill({ status: 503, json: { message: reason } });
+      }
+      return route.continue();
     });
-    await page.goto("/#/projects/" + project.id);
-    const start = page.getByRole("button", {
-      name: "开始项目深挖",
+    await page.goto("/#/projects/" + project.id + "?interview=1");
+    const practice = page.getByRole("dialog", { name: "项目面试室" });
+    const start = practice.getByRole("button", {
+      name: "同意并开始语音面试",
       exact: true,
     });
     await expect(start).toBeEnabled();
     await start.scrollIntoViewIfNeeded();
     await start.click();
-    const reason = "没有可用的深挖次数，请先获取训练包";
-    await expect(page.getByRole("alert")).toContainText(reason);
-    await expect(page.getByRole("alert")).toBeInViewport();
-    await expect(page.locator(".start-block .action-error")).toHaveText(reason);
-    await expect(start).toBeEnabled();
+    const error = practice.getByRole("alert");
+    await expect(error).toHaveText(reason);
+    await expect(error).toBeInViewport();
+    const retry = practice.getByRole("button", { name: "重试或恢复训练" });
+    await expect(retry).toBeEnabled();
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -50,11 +56,9 @@ for (const viewport of [
     await page.screenshot({
       path: `test-results/start-feedback-${viewport.width}.png`,
     });
-    const order = await post("/orders", { requestKey: crypto.randomUUID() });
-    await post("/orders/" + order.id + "/mock-pay");
-    await start.click();
-    await expect(page).toHaveURL(/#\/trainings\/[a-f0-9-]+$/);
-    await expect(page.getByText("问题 01", { exact: true })).toBeVisible();
-    await expect(page.getByRole("alert")).toHaveCount(0);
+    await retry.click();
+    await expect(practice.getByText(/^第 1 \/ \d+ 题$/)).toBeVisible();
+    await expect(error).toHaveCount(0);
+    expect(attempts).toBe(2);
   });
 }

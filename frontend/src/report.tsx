@@ -15,6 +15,7 @@ import { downloadReport } from "./report-export";
 import { Button, Loading, Empty, PageHead, sourceLabel } from "./ui";
 import type { Actions } from "./ui";
 import { RetestWorkspace } from "./retest-workspace";
+import { EvidenceReview } from "./evidence-review";
 
 function ReportTask({
   training,
@@ -160,7 +161,7 @@ function ReportBody({
           </div>
           <p>{f.assessment}</p>
           {f.supportExplanation && <p className="evidence-explanation">判断依据（AI说明）：{f.supportExplanation}</p>}
-          <small>已核对引用来源；技术判断和引用是否支持结论仍需复核。</small>
+          <EvidenceReview finding={f} />
           {f.evidence.map((e) => (
             <blockquote key={e.turnId}>
               <small>你的原回答 · {e.question}</small>

@@ -15,7 +15,6 @@ import org.springframework.boot.test.context.SpringBootTest;
   properties = {
     "spring.datasource.url=jdbc:h2:mem:history-tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
   }
 )
 class TrainingHistoryRegressionTest {
@@ -30,9 +29,6 @@ class TrainingHistoryRegressionTest {
   TrainingService trainings;
 
   @Autowired
-  PaymentService payments;
-
-  @Autowired
   ModelService model;
 
   String user() {
@@ -44,8 +40,6 @@ class TrainingHistoryRegressionTest {
       "unused",
       now()
     );
-    var order = payments.create(user, Map.of("requestKey", id()));
-    payments.mock(user, str(order, "id"));
     return user;
   }
 
@@ -81,6 +75,26 @@ class TrainingHistoryRegressionTest {
       user,
       Map.of("projectId", p.get("id"), "requestKey", id())
     );
+  }
+
+  @Test
+  void contextLimitIsVisibleWithoutLosingTheSavedTrainingAnswer() {
+    String user = user();
+    var p = project(user);
+    var gateway = spy(model);
+    var service = new TrainingService(s, projects, gateway);
+    var training = start(service, user, p);
+    String trainingId = str(training, "id");
+    String turnId = str(list(training, "turns").get(0), "id");
+    doThrow(new ModelContext.TooLarge()).when(gateway).question(any());
+    assertEquals(413, assertThrows(ModelContext.TooLarge.class, () -> service.answer(user, trainingId,
+      Map.of("turnId", turnId, "answer", "我只做了正常路径验证"))).getStatusCode().value());
+    var failed = service.get(user, trainingId);
+    assertEquals("FAILED", failed.get("status"));
+    assertEquals(0L, failed.get("leaseUntil"));
+    assertEquals("我只做了正常路径验证", list(failed, "turns").get(0).get("answer"));
+    assertEquals(new ModelContext.TooLarge().getReason(), failed.get("error"));
+    verify(gateway, times(1)).question(any());
   }
 
   @Test
@@ -162,7 +176,7 @@ class TrainingHistoryRegressionTest {
       now() + 1000,
       deep.get("id")
     );
-    var catalog = new TrainingCatalog(s, payments);
+    var catalog = new TrainingCatalog(s);
     var first = catalog.page(user, 0, 1, "", "");
     assertEquals(2, first.total());
     assertTrue(first.hasMore());
@@ -336,7 +350,7 @@ class TrainingHistoryRegressionTest {
   }
 
   @Test
-  void duplicateQuestionIsRejectedWithoutSavingAndRetryDoesNotConsumeAgain() {
+  void duplicateQuestionIsRejectedWithoutSavingAndRetryKeepsItsRecord() {
     String user = user();
     var p = project(user);
     var first = start(trainings, user, p);
@@ -349,13 +363,10 @@ class TrainingHistoryRegressionTest {
     )
       .when(fake)
       .firstDeepQuestion(anyMap());
-    var service = new TrainingService(s, projects, fake, payments);
+    var service = new TrainingService(s, projects, fake);
     var failed = start(service, user, p);
     assertEquals("FAILED", failed.get("status"));
     assertTrue(list(failed, "turns").isEmpty());
-    int used = (
-      (Number) payments.packages(user).get(0).get("training_used")
-    ).intValue();
     doReturn(
       new ModelService.GeneratedQuestion(
         "请说明一个尚未解释的错误恢复边界？",
@@ -367,10 +378,7 @@ class TrainingHistoryRegressionTest {
     var recovered = service.generate(user, str(failed, "id"));
     assertEquals("ACTIVE", recovered.get("status"));
     assertEquals(1, list(recovered, "turns").size());
-    assertEquals(
-      used,
-      ((Number) payments.packages(user).get(0).get("training_used")).intValue()
-    );
+    assertEquals(failed.get("id"), recovered.get("id"));
   }
 
   @Test
@@ -436,7 +444,7 @@ class TrainingHistoryRegressionTest {
     )
       .when(live)
       .call(anyString(), any());
-    var next = start(new TrainingService(s, projects, live, payments), user, p);
+    var next = start(new TrainingService(s, projects, live), user, p);
     assertEquals("ACTIVE", next.get("status"));
     assertEquals(
       "请解释历史回答尚未说明的重试边界？",
@@ -485,7 +493,7 @@ class TrainingHistoryRegressionTest {
     })
       .when(fake)
       .firstDeepQuestion(anyMap());
-    var service = new TrainingService(s, projects, fake, payments);
+    var service = new TrainingService(s, projects, fake);
     var pool = Executors.newFixedThreadPool(2);
     try {
       var a = pool.submit(() -> start(service, user, p));
@@ -551,7 +559,7 @@ class TrainingHistoryRegressionTest {
       .when(fake)
       .firstDeepQuestion(anyMap());
     var failed = start(
-      new TrainingService(s, projects, fake, payments),
+      new TrainingService(s, projects, fake),
       user,
       p
     );

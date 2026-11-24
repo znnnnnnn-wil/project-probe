@@ -1,14 +1,9 @@
 server:
-  port: ${PORT:8080}
+  port: ${PORT:8180}
   address: ${BIND_ADDRESS:127.0.0.1}
   forward-headers-strategy: none
   error:
     include-message: never
-logging:
-  level:
-    # SDK 错误日志可能包含完整交易响应；仅由业务层输出脱敏错误。
-    sdk.biz.err: OFF
-    sdk.biz.info: OFF
 spring:
   task:
     scheduling:
@@ -27,7 +22,8 @@ spring:
   jackson:
     default-property-inclusion: non_null
 app:
-  origin: ${APP_ORIGIN:http://localhost:5173}
+  practice-max-turns: ${PRACTICE_MAX_TURNS:5}
+  origin: ${APP_ORIGIN:http://localhost:5273}
   trusted-proxy-addresses: ${TRUSTED_PROXY_ADDRESSES:}
   secure-cookie: ${SECURE_COOKIE:false}
   model-mode: ${MODEL_MODE:demo}
@@ -36,7 +32,10 @@ app:
   model-output-price-per-million: ${MODEL_OUTPUT_PRICE_PER_MILLION:-1}
   model-timeout-seconds: ${MODEL_TIMEOUT_SECONDS:30}
   model-concurrency: ${MODEL_MAX_CONCURRENT_CALLS:4}
-  extraction-daily-limit: ${EXTRACTION_DAILY_LIMIT:20}
+  model-max-queued: ${MODEL_MAX_QUEUED:8}
+  model-queue-wait-ms: ${MODEL_QUEUE_WAIT_MS:3000}
+  model-evidence-spans-required: ${MODEL_EVIDENCE_SPANS_REQUIRED:true}
+  model-quality-review-enabled: ${MODEL_QUALITY_REVIEW_ENABLED:false}
   model-free-quota-only: ${MODEL_FREE_QUOTA_ONLY:false}
   model-free-quota-confirmed-model: ${MODEL_FREE_QUOTA_CONFIRMED_MODEL:}
   model-url: ${MODEL_BASE_URL:https://api.openai.com/v1}
@@ -46,31 +45,15 @@ app:
   speech-enabled: ${SPEECH_ENABLED:false}
   speech-paid-allowed: ${SPEECH_PAID_ALLOWED:false}
   speech-free-quota-confirmed-model: ${SPEECH_FREE_QUOTA_CONFIRMED_MODEL:}
+  speech-realtime-enabled: ${SPEECH_REALTIME_ENABLED:true}
+  speech-realtime-confirmed-model: ${SPEECH_REALTIME_CONFIRMED_MODEL:}
   speech-model: ${SPEECH_MODEL:qwen3-asr-flash}
   speech-url: ${SPEECH_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
   speech-key: ${SPEECH_API_KEY:}
-  speech-daily-limit: ${SPEECH_DAILY_LIMIT:20}
-  payment-mode: ${PAYMENT_MODE:mock}
-  payment:
-    mode: ${PAYMENT_MODE:mock}
-    price-cents: ${TRAINING_PRICE_CENTS:990}
-    order-ttl-minutes: ${ORDER_TTL_MINUTES:30}
-    expiry-sync-enabled: ${PAYMENT_EXPIRY_SYNC_ENABLED:false}
-    reconcile-enabled: ${PAYMENT_RECONCILE_ENABLED:false}
-    operations-enabled: ${PAYMENT_OPERATIONS_ENABLED:false}
-    sandbox:
-      app-id: ${ALIPAY_SANDBOX_APP_ID:}
-      seller-id: ${ALIPAY_SANDBOX_SELLER_ID:}
-      private-key-file: ${ALIPAY_SANDBOX_PRIVATE_KEY_FILE:}
-      public-key-file: ${ALIPAY_SANDBOX_PUBLIC_KEY_FILE:}
-      notify-url: ${ALIPAY_SANDBOX_NOTIFY_URL:}
-      return-url: ${ALIPAY_SANDBOX_RETURN_URL:http://localhost:5173/payment-return}
-      merchant-confirmed: ${ALIPAY_SANDBOX_MERCHANT_CONFIRMED:false}
-    production:
-      app-id: ${ALIPAY_PRODUCTION_APP_ID:}
-      seller-id: ${ALIPAY_PRODUCTION_SELLER_ID:}
-      private-key-file: ${ALIPAY_PRODUCTION_PRIVATE_KEY_FILE:}
-      public-key-file: ${ALIPAY_PRODUCTION_PUBLIC_KEY_FILE:}
-      notify-url: ${ALIPAY_PRODUCTION_NOTIFY_URL:}
-      return-url: ${ALIPAY_PRODUCTION_RETURN_URL:}
-      merchant-confirmed: ${ALIPAY_PRODUCTION_MERCHANT_CONFIRMED:false}
+  tts-enabled: ${TTS_ENABLED:false}
+  tts-paid-allowed: ${TTS_PAID_ALLOWED:false}
+  tts-free-quota-confirmed-model: ${TTS_FREE_QUOTA_CONFIRMED_MODEL:}
+  tts-model: ${TTS_MODEL:cosyvoice-v2}
+  tts-voice: ${TTS_VOICE:longcheng_v2}
+  tts-url: ${TTS_BASE_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
+  tts-key: ${TTS_API_KEY:}

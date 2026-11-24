@@ -4,27 +4,16 @@ import static com.projectprobe.Store.*;
 
 import java.util.*;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 @Service
 public class ProjectService {
 
+  private static final int MAX_BATCH_SIZE = 10;
+
   final Store s;
   final ModelService model;
   @org.springframework.beans.factory.annotation.Autowired JourneyMetrics journey;
-
-  @org.springframework.beans.factory.annotation.Value(
-    "${app.extraction-daily-limit:20}"
-  )
-  int extractionDailyLimit = 20;
-
-  @jakarta.annotation.PostConstruct
-  void validateExtractionLimit() {
-    if (
-      extractionDailyLimit < 1 || extractionDailyLimit > 1000
-    ) throw new IllegalArgumentException(
-      "事实提取额度须为每账号每 24 小时 1–1000 次"
-    );
-  }
 
   ProjectService(Store s, ModelService model) {
     this.s = s;
@@ -87,147 +76,164 @@ public class ProjectService {
       if (
         old != null && !Objects.equals(old.get("version"), input.get("version"))
       ) throw error(409, "项目已在其他页面修改，请重新加载后保存");
-      var body = new LinkedHashMap<String, Object>();
-      for (String field : List.of(
-        "name",
-        "background",
-        "targetRole",
-        "stack",
-        "responsibility",
-        "resume",
-        "architecture",
-        "implementation",
-        "problems",
-        "verification",
-        "materials"
-      )) {
-        String v = str(input, field);
-        if (v.length() > 12000) throw error(400, "单项材料最多 12000 字");
-        body.put(field, v);
-      }
-      required(body, "name", 100);
-      required(body, "responsibility", 12000);
-      if (s.encode(body).length() > 45000) throw error(
-        400,
-        "项目总材料请控制在 45000 字以内"
-      );
-      if (
-        old != null &&
-        body
-          .entrySet()
-          .stream()
-          .allMatch(e -> Objects.equals(old.get(e.getKey()), e.getValue()))
-      ) return old;
-      body.put("facts", List.of());
-      body.put("factsConfirmed", false);
-      int version =
-        old == null ? 1 : ((Number) old.get("version")).intValue() + 1;
-      if (old == null) s.db.update(
-        "INSERT INTO projects VALUES (?,?,?,?,?)",
-        id,
-        user,
-        s.encode(body),
-        version,
-        now()
-      );
-      else s.db.update(
-        "UPDATE projects SET body=?,version=?,updated_at=? WHERE id=?",
-        s.encode(body),
-        version,
-        now(),
-        id
-      );
-      s.db.update(
-        "INSERT INTO project_revisions VALUES (?,?,?)",
-        id,
-        version,
-        s.encode(body)
-      );
-      if (journey != null) journey.record(user, "MATERIAL_SAVED", id);
-      return get(user, id);
+      return saveLocked(user, id, old, materialBody(input));
     });
   }
 
-  Map<String, Object> extract(String user, String id) {
-    String identity = s.encode(
-      List.of(model.mode, model.provider, model.model)
-    );
-    String token = id();
-    var before = s.locked(user, () -> {
-      var b = get(user, id);
-      // 确认后的编辑仍保留；只有保存新材料或切换模型才重新提取。
-      if (identity.equals(b.get("factsExtractionIdentity"))) return b;
-      var rows = s.db.queryForList(
-        "SELECT * FROM extraction_limits WHERE user_id=?",
-        user
-      );
-      long time = now();
-      if (rows.isEmpty()) {
-        s.db.update(
-          "INSERT INTO extraction_limits(user_id,window_start) VALUES (?,?)",
-          user,
-          time
-        );
-        rows = s.db.queryForList(
-          "SELECT * FROM extraction_limits WHERE user_id=?",
-          user
-        );
-      }
-      var limit = rows.get(0);
-      if (((Number) limit.get("lease_until")).longValue() > time) throw error(
-        409,
-        "已有事实提取正在执行，请稍后再试"
-      );
-      long start = ((Number) limit.get("window_start")).longValue();
-      int attempts = ((Number) limit.get("attempts")).intValue();
-      if (time - start >= 86400000L) {
-        start = time;
-        attempts = 0;
-      }
-      if (attempts >= extractionDailyLimit) throw error(
-        429,
-        "本账号的事实提取额度已用完，请在当前 24 小时窗口结束后重试"
-      );
-      s.db.update(
-        "UPDATE extraction_limits SET window_start=?,attempts=?,lease_until=?,lease_token=? WHERE user_id=?",
-        start,
-        attempts + 1,
-        time + 90000,
-        token,
-        user
-      );
-      return b;
+  Map<String, Object> openExample(String user, String id, Map<String, Object> input) {
+    return s.locked(user, () -> {
+      var exists = s.db.queryForList("SELECT id FROM projects WHERE id=? AND user_id=?", id, user);
+      return exists.isEmpty() ? saveLocked(user, id, null, materialBody(input)) : get(user, id);
     });
-    if (identity.equals(before.get("factsExtractionIdentity"))) return before;
+  }
+
+  List<Map<String, Object>> createBatch(String user, Map<String, Object> input) {
+    if (
+      !(input.get("projects") instanceof List<?> entries) ||
+      entries.isEmpty() || entries.size() > MAX_BATCH_SIZE
+    ) throw error(400, "每次可保存 1–" + MAX_BATCH_SIZE + " 个项目");
+
+    String requestKey = input.get("requestKey") == null
+      ? ""
+      : required(input, "requestKey", 100);
+    var bodies = new ArrayList<Map<String, Object>>(entries.size());
+    for (int i = 0; i < entries.size(); i++) {
+      if (!(entries.get(i) instanceof Map<?, ?> project)) throw error(
+        400, "第 " + (i + 1) + " 个项目的格式不正确"
+      );
+      try {
+        bodies.add(materialBody(project));
+      } catch (ResponseStatusException e) {
+        throw error(400, "第 " + (i + 1) + " 个项目：" + e.getReason());
+      }
+    }
+
+    String fingerprint = requestKey.isEmpty() ? "" : Auth.hash(s.encode(bodies));
+    return s.locked(user, () -> {
+      if (!requestKey.isEmpty()) {
+        var existing = s.db.queryForList(
+          "SELECT fingerprint,project_ids FROM project_batch_creations WHERE user_id=? AND request_key=?",
+          user,
+          requestKey
+        );
+        if (!existing.isEmpty()) {
+          var saved = existing.get(0);
+          if (!fingerprint.equals(saved.get("fingerprint"))) throw error(
+            409, "本次保存标识已用于另一批项目，请重新提交"
+          );
+          return Arrays.stream(str(saved, "project_ids").split(","))
+            .map(id -> get(user, id))
+            .toList();
+        }
+      }
+      var projects = new ArrayList<Map<String, Object>>(bodies.size());
+      for (var body : bodies) projects.add(saveLocked(user, id(), null, body));
+      if (!requestKey.isEmpty()) {
+        var ids = projects.stream().map(project -> str(project, "id")).toList();
+        s.db.update(
+          "INSERT INTO project_batch_creations(user_id,request_key,fingerprint,project_ids) VALUES (?,?,?,?)",
+          user,
+          requestKey,
+          fingerprint,
+          String.join(",", ids)
+        );
+      }
+      return projects;
+    });
+  }
+
+  private Map<String, Object> materialBody(Map<?, ?> input) {
+    var body = new LinkedHashMap<String, Object>();
+    for (String field : List.of(
+      "name",
+      "background",
+      "targetRole",
+      "stack",
+      "responsibility",
+      "resume",
+      "architecture",
+      "implementation",
+      "problems",
+      "verification",
+      "materials"
+    )) {
+      String v = Objects.toString(input.get(field), "");
+      if (v.length() > 12000) throw error(400, "单项材料最多 12000 字");
+      body.put(field, v);
+    }
+    required(body, "name", 100);
+    if (s.encode(body).length() > 45000) throw error(
+      400,
+      "项目总材料请控制在 45000 字以内"
+    );
+    return body;
+  }
+
+  private Map<String, Object> saveLocked(
+    String user,
+    String id,
+    Map<String, Object> old,
+    Map<String, Object> body
+  ) {
+    if (
+      old != null &&
+      body.entrySet().stream().allMatch(e -> Objects.equals(old.get(e.getKey()), e.getValue()))
+    ) return old;
+    body.put("facts", List.of());
+    body.put("factsConfirmed", false);
+    int version = old == null ? 1 : ((Number) old.get("version")).intValue() + 1;
+    String encoded = s.encode(body);
+    if (old == null) s.db.update(
+      "INSERT INTO projects VALUES (?,?,?,?,?)",
+      id,
+      user,
+      encoded,
+      version,
+      now()
+    );
+    else s.db.update(
+      "UPDATE projects SET body=?,version=?,updated_at=? WHERE id=?",
+      encoded,
+      version,
+      now(),
+      id
+    );
+    s.db.update(
+      "INSERT INTO project_revisions VALUES (?,?,?)",
+      id,
+      version,
+      encoded
+    );
+    if (journey != null) journey.record(user, "MATERIAL_SAVED", id);
+    return get(user, id);
+  }
+
+  private record Extraction(Map<String, Object> project, MaterialJob job) {}
+
+  Map<String, Object> extract(String user, String id) {
+    String identity = s.encode(List.of(model.mode, model.provider, model.model));
+    var task = s.locked(user, () -> {
+      var project = get(user, id);
+      // 确认后的编辑仍保留；只有保存新材料或切换模型才重新提取。
+      if (identity.equals(project.get("factsExtractionIdentity"))) return new Extraction(project, null);
+      return new Extraction(project, MaterialJob.claim(s, user, "EXTRACTION", id, "该项目正在提取事实，请稍后重试"));
+    });
+    if (task.job() == null) return task.project();
+
     try {
-      var facts = model.extract(before);
+      var facts = model.extract(task.project());
       return s.locked(user, () -> {
-        var lease = s.one(
-          "SELECT * FROM extraction_limits WHERE user_id=?",
-          user
-        );
-        if (!token.equals(lease.get("lease_token"))) throw error(
-          409,
-          "提取任务已超时并被替换，请重新加载"
-        );
-        var b = get(user, id);
-        if (!b.get("version").equals(before.get("version"))) throw error(
-          409,
-          "材料已更改，请重新提取"
-        );
-        b.put("facts", facts);
-        b.put("factsConfirmed", false);
-        b.put("factsExtractionIdentity", identity);
-        persist(id, b);
-        return b;
+        task.job().requireCurrent(s);
+        var project = get(user, id);
+        if (!project.get("version").equals(task.project().get("version"))) throw error(409, "材料已更改，请重新提取");
+        project.put("facts", facts);
+        project.put("factsConfirmed", false);
+        project.put("factsExtractionIdentity", identity);
+        persist(id, project);
+        return project;
       });
     } finally {
-      // 旧任务不得清除已被新任务接管的租约。
-      s.db.update(
-        "UPDATE extraction_limits SET lease_until=0,lease_token=NULL WHERE user_id=? AND lease_token=?",
-        user,
-        token
-      );
+      task.job().release(s);
     }
   }
 

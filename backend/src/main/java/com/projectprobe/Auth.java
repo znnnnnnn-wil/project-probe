@@ -88,14 +88,22 @@ public class Auth {
     byte[] bytes = new byte[32];
     new SecureRandom().nextBytes(bytes);
     String token = HexFormat.of().formatHex(bytes);
-    s.db.update(
-      "INSERT INTO auth_sessions VALUES (?,?,?)",
-      hash(token),
-      user,
-      now() + 7 * 86400000L
-    );
+    s.locked(user, () -> {
+      // BCrypt 在锁外执行；发放会话前与改密、恢复及注销共用用户锁核对凭据。
+      var current = s.one("SELECT username,password_hash FROM app_users WHERE id=?", user);
+      if (!name.equals(current.get("username")) ||
+          !Objects.equals(rows.get(0).get("password_hash"), current.get("password_hash")))
+        throw error(401, "账户凭据已更新，请重新登录");
+      s.db.update(
+        "INSERT INTO auth_sessions VALUES (?,?,?)",
+        hash(token),
+        user,
+        now() + 7 * 86400000L
+      );
+      if (register) journey.record(user, "REGISTERED", user);
+      return null;
+    });
     cookie(res, token, 7 * 86400);
-    if (register) journey.record(user, "REGISTERED", user);
     return Map.of("id", user, "username", name);
   }
 

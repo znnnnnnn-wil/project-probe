@@ -13,12 +13,13 @@ class AnswerDrafts {
     var training = trainings.get(user, trainingId);
     var turns = list(training, "turns");
     String turn = turns.isEmpty() ? "" : str(turns.get(turns.size() - 1), "id");
+    int questionVersion = turns.isEmpty() ? 0 : TrainingService.questionVersion(turns.get(turns.size() - 1));
     var rows = s.db.queryForList("SELECT * FROM answer_drafts WHERE training_id=? AND turn_id=? AND updated_at>?",
       trainingId, turn, now() - 30L * 86400000);
     if (!"ACTIVE".equals(training.get("status")) || rows.isEmpty())
-      return Map.of("turnId", turn, "answer", "", "version", 0);
+      return Map.of("turnId", turn, "answer", "", "version", 0, "questionVersion", questionVersion);
     var row = rows.get(0);
-    return Map.of("turnId", turn, "answer", row.get("body"), "version", row.get("version"), "updatedAt", row.get("updated_at"));
+    return Map.of("turnId", turn, "answer", row.get("body"), "version", row.get("version"), "updatedAt", row.get("updated_at"), "questionVersion", questionVersion);
   }
   Map<String, Object> save(String user, String trainingId, Map<String, Object> input) {
     String turn = required(input, "turnId", 36), answer = str(input, "answer");
@@ -29,6 +30,7 @@ class AnswerDrafts {
       if (!"ACTIVE".equals(training.get("status")) || turns.isEmpty() ||
           !turn.equals(turns.get(turns.size() - 1).get("id")) || !str(turns.get(turns.size() - 1), "answer").isBlank())
         throw error(409, "当前问题已结束，旧草稿不能覆盖");
+      TrainingService.requireQuestionVersion(turns.get(turns.size() - 1), input);
       var current = read(user, trainingId);
       int expected = ((Number) current.get("version")).intValue();
       if (version.intValue() != expected) throw error(409, "草稿已在其他设备更新，请重新打开训练并核对");

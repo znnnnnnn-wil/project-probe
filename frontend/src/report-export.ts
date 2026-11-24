@@ -27,7 +27,15 @@ export function reportMarkdown(training: Training) {
     );
     if (plan?.note) lines.push("", "我的补充笔记：", plan.note);
     if (finding.supportExplanation) lines.push("", "判断依据（AI说明）：" + finding.supportExplanation);
-    lines.push("", "已核对引用来源；技术判断和引用是否支持结论仍需复核。");
+    lines.push("", finding.evidenceStatus === "MODEL_REVIEWED_NEEDS_HUMAN_REVIEW"
+      ? "已做第二次AI语义复核；技术结论仍需人工核对。"
+      : finding.evidenceStatus === "SOURCE_SPANS_CHECKED_NEEDS_REVIEW"
+        ? "已逐字核对所引原文片段；判断是否成立仍需人工复核。"
+      : "已核对引用来源；技术判断和引用是否支持结论仍需复核。");
+    if (finding.supportingQuotes?.length) {
+      lines.push("", "本条判断对应的原文片段：");
+      finding.supportingQuotes.forEach(source => lines.push("", source.quote));
+    }
     finding.evidence.forEach((e) =>
       lines.push("", "追问：" + e.question, "", "原回答：", e.quote),
     );

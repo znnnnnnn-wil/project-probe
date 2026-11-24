@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.alipay.api.internal.util.AlipaySignature;
-import java.security.*;
 import java.util.*;
 import java.util.concurrent.*;
 import org.junit.jupiter.api.*;
@@ -19,12 +17,11 @@ import org.springframework.web.server.ResponseStatusException;
 
 @SpringBootTest(
   properties = {
+    "app.origin=http://localhost:5173",
     "spring.datasource.url=${PROBE_TEST_DB_URL:jdbc:h2:mem:tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}",
     "spring.datasource.username=${PROBE_TEST_DB_USER:sa}",
     "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
-    "app.payment.reconcile-enabled=false",
   }
 )
 @AutoConfigureMockMvc
@@ -38,9 +35,6 @@ class WorkflowTest {
 
   @Autowired
   TrainingService trainings;
-
-  @Autowired
-  PaymentService payments;
 
   @Autowired
   ModelService model;
@@ -85,128 +79,23 @@ class WorkflowTest {
     return projects.confirm(user, id, p);
   }
 
-  String grant(String user) {
-    var order = payments.create(user, Map.of("requestKey", id()));
-    // 旧闭环继续验证迁移前的一深挖一复测套餐。
-    s.db.update("UPDATE purchase_orders SET product_code='LEGACY_PAIR',training_limit=2 WHERE id=?", order.get("id"));
-    payments.mock(user, str(order, "id"));
-    return str(order, "id");
-  }
-
-  Map<String, Object> grantProduct(String user, String code) {
-    var order = payments.create(user, Map.of("requestKey", id(), "productCode", code));
-    payments.mock(user, str(order, "id"));
-    return order;
-  }
-
-  long used(String user) {
-    return ((Number) payments.packages(user).get(0).get("training_used")).longValue();
-  }
-
   @Test
-  void tenTrainingsShareDeepAndRetestQuotaAndResumeDoesNotCharge() {
-    String u = user();
-    var p = project(u);
-    grantProduct(u, "TEN_TRAININGS");
-    var deep = complete(u, start(u, p));
-    assertEquals(1, used(u));
-    var request = Map.<String, Object>of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id());
-    var retest = trainings.start(u, request);
-    assertEquals(2, used(u));
-    assertEquals(retest.get("id"), trainings.start(u, request).get("id"));
-    assertEquals(retest.get("id"), trainings.start(u, new HashMap<>(Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()))).get("id"));
-    assertEquals(2, used(u));
-    for (int i = 0; i < 8; i++) start(u, p);
-    assertEquals(10, used(u));
-    assertEquals(409, assertThrows(ResponseStatusException.class, () -> start(u, p)).getStatusCode().value());
-    assertEquals(0L, ((Map<?, ?>)payments.shop(u).get("quota")).get("sharedRemaining"));
-  }
-
-  @Test
-  void sharedQuotaRefundIsExactlyOnceAndCanBeReused() {
-    String u = user();
-    var p = project(u);
-    grantProduct(u, "TEN_TRAININGS");
-    var t = start(u, p);
-    assertEquals(1, used(u));
-    s.db.update("UPDATE trainings SET status='FAILED' WHERE id=?", t.get("id"));
-    trainings.refund(u, str(t, "id"));
-    trainings.refund(u, str(t, "id"));
-    assertEquals(0, used(u));
-    start(u, p);
-    assertEquals(1, used(u));
-    var deep = complete(u, start(u, p));
-    var retest = trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()));
-    assertEquals(3, used(u));
-    s.db.update("UPDATE trainings SET status='FAILED' WHERE id=?", retest.get("id"));
-    trainings.refund(u, str(retest, "id"));
-    trainings.refund(u, str(retest, "id"));
-    assertEquals(2, used(u));
-    assertEquals("AVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
-  }
-
-  @Test
-  void lifetimePriceIsServerDefinedAndUsageIsUnlimited() {
-    String u = user();
-    var order = payments.create(u, Map.of("requestKey", id(), "productCode", "LIFETIME", "amountCents", 1, "trainingLimit", 9999999));
-    assertEquals(999900, order.get("amount_cents"));
-    assertEquals(true, order.get("lifetime"));
-    payments.mock(u, str(order, "id"));
-    payments.mock(u, str(order, "id"));
-    assertEquals(1, payments.packages(u).size());
-    var p = project(u);
-    for (int i = 0; i < 12; i++) start(u, p);
-    assertEquals(12, used(u));
-    assertEquals(true, ((Map<?, ?>)payments.shop(u).get("quota")).get("unlimited"));
-  }
-
-  @Test
-  void packageSelectionRejectsUnknownProductsAndReusedKeyForDifferentProduct() {
-    String u = user();
-    assertEquals(400, assertThrows(ResponseStatusException.class,
-      () -> payments.create(u, Map.of("requestKey", id(), "productCode", "LEGACY_PAIR"))).getStatusCode().value());
-    String key = id();
-    var order = payments.create(u, Map.of("requestKey", key, "productCode", "TEN_TRAININGS"));
-    assertEquals(990, order.get("amount_cents"));
-    assertEquals(10, order.get("training_limit"));
-    assertEquals(order.get("id"), payments.create(u, Map.of("requestKey", key, "productCode", "TEN_TRAININGS")).get("id"));
-    assertEquals(409, assertThrows(ResponseStatusException.class,
-      () -> payments.create(u, Map.of("requestKey", key, "productCode", "LIFETIME"))).getStatusCode().value());
-  }
-
-  @Test
-  void concurrentSharedQuotaCannotOverspendTenStarts() throws Exception {
-    String u = user();
-    var p = project(u);
-    grantProduct(u, "TEN_TRAININGS");
-    var executor = Executors.newFixedThreadPool(12);
-    try {
-      var jobs = new ArrayList<Callable<Boolean>>();
-      for (int i = 0; i < 18; i++) jobs.add(() -> {
-        try { start(u, p); return true; }
-        catch (ResponseStatusException e) { assertEquals(409, e.getStatusCode().value()); return false; }
-      });
-      int successful = 0;
-      for (var future : executor.invokeAll(jobs)) if (future.get()) successful++;
-      assertEquals(10, successful);
-      assertEquals(10, used(u));
-    } finally { executor.shutdownNow(); }
-  }
-
-  @Test
-  void newPackageCanFundRetestFromExhaustedPackage() {
-    String u = user();
-    var p = project(u);
-    var order = grantProduct(u, "TEN_TRAININGS");
-    var deep = complete(u, start(u, p));
-    for (int i = 0; i < 9; i++) start(u, p);
-    assertEquals("UNAVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
-    grantProduct(u, "TEN_TRAININGS");
-    assertEquals("AVAILABLE", ((Map<?, ?>)trainings.get(u, str(deep, "id")).get("retestEntry")).get("state"));
-    var retest = trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id()));
-    assertNotEquals(deep.get("packageId"), retest.get("packageId"));
-    assertEquals(10L, ((Number)s.one("SELECT training_used FROM training_packages WHERE order_id=?", order.get("id")).get("training_used")).longValue());
-    assertEquals(retest.get("id"), trainings.start(u, Map.of("projectId", p.get("id"), "parentId", deep.get("id"), "requestKey", id())).get("id"));
+  void startsWithoutPurchasesAndReusesAnActiveRetest() {
+    String user = user();
+    var project = project(user);
+    var deep = complete(user, start(user, project));
+    var retest = trainings.start(user, Map.of(
+      "projectId", project.get("id"), "parentId", deep.get("id"), "requestKey", id()
+    ));
+    assertEquals(retest.get("id"), trainings.start(user, Map.of(
+      "projectId", project.get("id"), "parentId", deep.get("id"), "requestKey", id()
+    )).get("id"));
+    assertEquals(0, s.db.queryForObject(
+      "SELECT COUNT(*) FROM purchase_orders WHERE user_id=?", Integer.class, user
+    ));
+    assertEquals(2, s.db.queryForObject(
+      "SELECT COUNT(*) FROM trainings WHERE user_id=? AND package_id IS NULL", Integer.class, user
+    ));
   }
 
   Map<String, Object> start(String user, Map<String, Object> p) {
@@ -239,7 +128,6 @@ class WorkflowTest {
   void completeEvidenceRevisionAndRetest() {
     String u = user();
     var p = project(u);
-    grant(u);
     var t = complete(u, start(u, p));
     var report = (Map<String, Object>) t.get("report");
     assertEquals(5, list(report, "findings").size());
@@ -285,16 +173,12 @@ class WorkflowTest {
     String u = user(),
       other = user();
     var p = project(u);
-    String order = grant(u);
     var t = start(u, p);
     assertThrows(ResponseStatusException.class, () ->
       projects.get(other, str(p, "id"))
     );
     assertThrows(ResponseStatusException.class, () ->
       trainings.get(other, str(t, "id"))
-    );
-    assertThrows(ResponseStatusException.class, () ->
-      payments.mock(other, order)
     );
     assertTrue(projects.all(other).isEmpty());
   }
@@ -303,7 +187,6 @@ class WorkflowTest {
   void reportPlanIsPersistedScopedAndDoesNotRewriteEvidence() throws Exception {
     String u = user();
     var p = project(u);
-    grant(u);
     var active = start(u, p);
     String tid = str(active, "id");
     var change = Map.<String, Object>of("taskIndex", 0, "done", true, "note", "并发测试记录待补充", "version", 0);
@@ -339,64 +222,9 @@ class WorkflowTest {
   }
 
   @Test
-  void paymentIdempotencyAndServerPrice() throws Exception {
-    String u = user();
-    var order = payments.create(
-      u,
-      Map.of("requestKey", "same", "amount_cents", 1)
-    );
-    String oid = str(order, "id");
-    assertEquals(990, order.get("amount_cents"));
-    assertEquals(
-      oid,
-      payments.create(u, Map.of("requestKey", "same")).get("id")
-    );
-    parallel(8, () -> {
-      payments.mock(u, oid);
-      return true;
-    });
-    assertEquals(
-      1,
-      s.db.queryForObject(
-        "SELECT COUNT(*) FROM training_packages WHERE order_id=?",
-        Integer.class,
-        oid
-      )
-    );
-    assertThrows(ResponseStatusException.class, () ->
-      payments.settle(oid, "MOCK-" + oid, "mock", 1)
-    );
-  }
-
-  @Test
-  void concurrentStartsCannotOverspend() throws Exception {
-    String u = user();
-    var p = project(u);
-    grant(u);
-    var results = parallel(8, () -> {
-      try {
-        start(u, p);
-        return true;
-      } catch (ResponseStatusException e) {
-        return false;
-      }
-    });
-    assertEquals(1, results.stream().filter(Boolean::booleanValue).count());
-    assertEquals(
-      1,
-      s.db.queryForObject(
-        "SELECT COUNT(*) FROM trainings WHERE user_id=?",
-        Integer.class,
-        u
-      )
-    );
-  }
-
-  @Test
   void sameStartAndAnswerAreIdempotent() throws Exception {
     String u = user();
     var p = project(u);
-    grant(u);
     var input = Map.<String, Object>of(
       "projectId",
       p.get("id"),
@@ -422,10 +250,9 @@ class WorkflowTest {
   }
 
   @Test
-  void expiredGenerationCanResumeAndRefundOnlyOnce() throws Exception {
+  void expiredGenerationCanResume() {
     String u = user();
     var p = project(u);
-    grant(u);
     var t = start(u, p);
     String tid = str(t, "id");
     t.put("operation", "REPORT");
@@ -435,32 +262,15 @@ class WorkflowTest {
       s.encode(t),
       tid
     );
-    var results = parallel(6, () -> trainings.refund(u, tid));
-    assertEquals("REFUNDED", results.get(0).get("status"));
-    assertEquals(
-      1,
-      s.db.queryForObject(
-        "SELECT COUNT(*) FROM entitlement_events WHERE training_id=? AND event_type='RETURNED'",
-        Integer.class,
-        tid
-      )
-    );
-    assertFalse(
-      (Boolean) ((List<Map<String, Object>>) payments.shop(u).get("packages"))
-        .get(0)
-        .get("deep_used")
-    );
-    var again = start(u, p);
-    assertThrows(ResponseStatusException.class, () ->
-      trainings.refund(u, str(again, "id"))
-    );
+    var recovered = trainings.generate(u, tid);
+    assertEquals(tid, recovered.get("id"));
+    assertEquals("COMPLETED", recovered.get("status"));
   }
 
   @Test
   void failedModelPreservesAnswerAndCanRetry() {
     String u = user();
     var p = project(u);
-    grant(u);
     var t = start(u, p);
     String tid = str(t, "id");
     var broken = new ModelService(
@@ -543,89 +353,11 @@ class WorkflowTest {
   }
 
   @Test
-  void signedSandboxNotificationsAreVerifiedAndIdempotent() throws Exception {
-    var gen = KeyPairGenerator.getInstance("RSA");
-    gen.initialize(2048);
-    var pair = gen.generateKeyPair();
-    String priv = Base64.getEncoder().encodeToString(
-        pair.getPrivate().getEncoded()
-      ),
-      pub = Base64.getEncoder().encodeToString(pair.getPublic().getEncoded());
-    var service = new PaymentService(
-      s,
-      "sandbox",
-      "app-test",
-      Base64.getEncoder().encodeToString(
-        gen.generateKeyPair().getPrivate().getEncoded()
-      ),
-      pub,
-      "seller-test",
-      "https://example.test/api/payments/notify",
-      "https://example.test"
-    );
-    String u = user();
-    var sandboxOrder = service.create(u, Map.of("requestKey", id()));
-    String oid = str(sandboxOrder, "id");
-    var params = new HashMap<String, String>(
-      Map.of(
-        "app_id",
-        "app-test",
-        "seller_id",
-        "seller-test",
-        "out_trade_no",
-        str(sandboxOrder, "merchant_order_no"),
-        "total_amount",
-        "9.90",
-        "trade_status",
-        "TRADE_SUCCESS",
-        "trade_no",
-        "sandbox-" + id()
-      )
-    );
-    params.put(
-      "sign",
-      AlipaySignature.rsaSign(
-        AlipaySignature.getSignContent(params),
-        priv,
-        "UTF-8",
-        "RSA2"
-      )
-    );
-    params.put("sign_type", "RSA2");
-    assertEquals("success", service.notify(params));
-    assertEquals("success", service.notify(params));
-    assertEquals(
-      1,
-      s.db.queryForObject(
-        "SELECT COUNT(*) FROM training_packages WHERE order_id=?",
-        Integer.class,
-        oid
-      )
-    );
-    params.put("total_amount", "0.01");
-    assertEquals("failure", service.notify(params));
-    params.remove("sign");
-    params.remove("sign_type");
-    params.put("seller_id", "wrong-seller");
-    params.put(
-      "sign",
-      AlipaySignature.rsaSign(
-        AlipaySignature.getSignContent(params),
-        priv,
-        "UTF-8",
-        "RSA2"
-      )
-    );
-    params.put("sign_type", "RSA2");
-    assertEquals("failure", service.notify(params));
-  }
-
-  @Test
   void httpAuthAndOriginGuards() throws Exception {
     mvc.perform(get("/api/projects")).andExpect(status().isUnauthorized());
     mvc
       .perform(
-        post("/api/orders").contentType("application/json").content("{}")
+        post("/api/projects").contentType("application/json").content("{}")
       )
       .andExpect(status().isForbidden());
     String body = s.encode(
@@ -668,14 +400,10 @@ class WorkflowTest {
     );
     p = projects.extract(u, str(p, "id"));
     p = projects.confirm(u, str(p, "id"), p);
-    grant(u);
     var t = start(u, p);
     var done = trainings.finish(u, str(t, "id"));
     assertTrue(
       list((Map<String, Object>) done.get("report"), "findings").isEmpty()
-    );
-    assertThrows(ResponseStatusException.class, () ->
-      trainings.refund(u, str(t, "id"))
     );
   }
 

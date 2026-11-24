@@ -6,23 +6,20 @@ import React, {
   lazy,
   Suspense,
 } from "react";
-import {
-  ArrowUpRight,
-  MessageSquare,
-  LogOut,
-  Menu,
-  X,
-  LoaderCircle,
-} from "lucide-react";
+import { LogOut, Menu, X, LoaderCircle } from "lucide-react";
 import { api, ApiError, go } from "./api";
 import { Workspace } from "./workspace";
 import { Loading, Empty, PageBoundary } from "./ui";
+import { syncSessionUser } from "./session-user";
 
 import { createRoot } from "react-dom/client";
 import "./style.css";
+import "./theme.css";
 const Home = lazy(() =>
-  import("./home").then((module) => ({ default: module.Home })),
+  import("./landing").then((module) => ({ default: module.Home })),
 );
+const Experience = lazy(() => import("./experience").then(module => ({ default: module.ExperiencePage })));
+const ExampleProjects = lazy(() => import("./example-projects").then(module => ({ default: module.ExampleProjects })));
 const Account = lazy(() => import("./account").then(module => ({ default: module.Account })));
 const PrivacyInfo = lazy(() => import("./privacy").then(module => ({ default: module.PrivacyInfo })));
 const Login = lazy(() =>
@@ -30,6 +27,12 @@ const Login = lazy(() =>
 );
 const Editor = lazy(() =>
   import("./editor").then((module) => ({ default: module.Editor })),
+);
+const ProjectInterview = lazy(() =>
+  import("./project-practice").then((module) => ({ default: module.ProjectInterview })),
+);
+const NewProject = lazy(() =>
+  import("./new-project").then((module) => ({ default: module.NewProject })),
 );
 const History = lazy(() =>
   import("./history").then((module) => ({ default: module.History })),
@@ -40,18 +43,8 @@ const Interview = lazy(() =>
 const ReportPage = lazy(() =>
   import("./report").then((module) => ({ default: module.ReportPage })),
 );
-const ShopPage = lazy(() =>
-  import("./shop").then((module) => ({ default: module.ShopPage })),
-);
-const PaymentReturn = lazy(() =>
-  import("./shop").then((module) => ({ default: module.PaymentReturn })),
-);
-
 function App() {
-  const [path, setPath] = useState(
-    location.hash.slice(1) ||
-      (location.pathname === "/payment-return" ? "/payment-return" : "/"),
-  );
+  const [path, setPath] = useState(location.hash.slice(1) || "/");
   const [user, setUser] = useState<{ id: string; username: string } | null>(
     null,
   );
@@ -59,10 +52,9 @@ function App() {
   const [config, setConfig] = useState<{
     modelMode: string;
     modelName?: string;
-    paymentMode: string;
-    paymentConfigured: boolean;
   } | null>(null);
   const [error, setError] = useState("");
+  const [serviceError, setServiceError] = useState("");
   const [pendingRequests, setPendingRequests] = useState(0);
   const busy = pendingRequests > 0;
   const [menu, setMenu] = useState(false);
@@ -70,23 +62,25 @@ function App() {
   useEffect(() => {
     const change = () => {
       ++navigationVersion.current;
-      setPath(
-        location.hash.slice(1) ||
-          (location.pathname === "/payment-return" ? "/payment-return" : "/"),
-      );
+      setPath(location.hash.slice(1) || "/");
       setError("");
       setMenu(false);
       window.scrollTo(0, 0);
     };
     window.addEventListener("hashchange", change);
-    api<typeof config>("/config")
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    api<typeof config>("/config", "GET", undefined, controller.signal)
       .then(setConfig)
-      .catch(() => setError("暂时无法连接服务，请确认后端已启动后刷新。"));
-    api<typeof user>("/me")
-      .then(setUser)
+      .catch(() => setServiceError("面试服务暂未连接。你可以返回首页使用快捷体验；本地使用请先启动后端再刷新。"));
+    api<typeof user>("/me", "GET", undefined, controller.signal)
+      .then((value) => {
+        if (value) syncSessionUser(value.id);
+        setUser(value);
+      })
       .catch(() => {})
-      .finally(() => setReady(true));
-    return () => window.removeEventListener("hashchange", change);
+      .finally(() => { setReady(true); });
+    return () => { window.removeEventListener("hashchange", change); window.clearTimeout(timeout); controller.abort(); };
   }, []);
   const run = useCallback(async (fn: () => Promise<void>) => {
     const version = navigationVersion.current;
@@ -110,48 +104,69 @@ function App() {
     }
   }, []);
   const props = { run, busy };
-  const nav = path.split("/")[1];
+  const [route, search] = path.split("?", 2);
+  const [, nav, routeId, historyRoundId, exampleRoundId] = route.split("/");
+  const projectQuery = new URLSearchParams(search);
+  const projectRoundId = nav === "projects" && routeId && routeId !== "new" ? projectQuery.get("roundId") : null;
+  const publicHome = path === "/" && !user;
+  const exampleHistory = nav === "history" && routeId === "examples";
+  const historyProjectId = exampleHistory ? historyRoundId : routeId;
+  const historyOverview = nav === "history" && !historyProjectId;
+  const publicHistory = exampleHistory || historyOverview;
+  const publicPage = nav === "experience" || publicHistory || publicHome;
+  const projectsActive = nav === "projects" || (!!user && !nav);
   useEffect(() => {
     if (
       ready &&
       !user &&
+      !publicHistory &&
       path !== "/" &&
       path !== "/login" &&
-      /^\/(projects|trainings|report|shop|history|payment-return)(\/|$)/.test(
+      /^\/(projects|trainings|report|history)(\/|$)/.test(
         path,
       )
     ) {
       sessionStorage.setItem("auth:return", path);
     }
-  }, [path, ready, user]);
+  }, [publicHistory, path, ready, user]);
+  useEffect(() => {
+    if (user && projectRoundId)
+      window.location.replace(`#/history/${routeId}/${encodeURIComponent(projectRoundId)}`);
+  }, [user, routeId, projectRoundId]);
   return (
     <>
-      <header>
+      <header className={publicHome ? "site-header site-header--public-home" : "site-header"}>
+        <div className="header-inner">
         <a className="brand" href="#/">
-          <span className="brand-icon">
-            <MessageSquare size={19} />
-          </span>
-          项目追问官<span className="brand-dot">·</span>
+          <span className="brand-icon" aria-hidden="true">问</span>
+          项目追问官
         </a>
         <button
           className="menu-toggle"
           aria-label="切换导航"
+          aria-controls="site-navigation"
+          aria-expanded={menu}
           onClick={() => setMenu(!menu)}
         >
           {menu ? <X /> : <Menu />}
         </button>
-        <nav className={menu ? "open" : ""}>
+        <nav id="site-navigation" className={menu ? "open" : ""} aria-label="主导航">
           <a
-            className={nav === "projects" || (user && !nav) ? "selected" : ""}
+            className={nav === "experience" || publicHome ? "selected" : ""}
+            aria-current={nav === "experience" ? "page" : undefined}
+            href="#/experience"
+          >
+            示例练习
+          </a>
+          <a
+            className={projectsActive ? "selected" : ""}
+            aria-current={projectsActive ? "page" : undefined}
             href="#/projects"
           >
             我的项目
           </a>
-          <a className={nav === "history" ? "selected" : ""} href="#/history">
+          <a className={nav === "history" ? "selected" : ""} aria-current={nav === "history" ? "page" : undefined} href="#/history">
             训练记录
-          </a>
-          <a className={nav === "shop" ? "selected" : ""} href="#/shop">
-            训练包与订单
           </a>
         </nav>
         <div className="account">
@@ -174,25 +189,16 @@ function App() {
               </button>
             </>
           ) : (
-            <a href="#/login">
-              登录 / 注册 <ArrowUpRight size={14} />
+            <a className="account-login" href="#/login">
+              登录 / 注册
             </a>
           )}
         </div>
+        </div>
       </header>
-      <div className="mode-strip">
-        {config?.modelMode === "demo" && <span>规则演示 · 非 AI 技术评估</span>}
-        <span className="strip-right">
-          {config?.paymentMode === "mock"
-            ? "开发模拟支付 · 不产生真实扣款"
-            : config?.paymentMode === "production"
-              ? "正式支付宝支付 · 会产生真实扣款"
-              : "官方沙箱 · 非真实交易"}
-        </span>
-      </div>
-      {error && (
+      {(error || (!publicPage && serviceError)) && (
         <div role="alert" className="error">
-          <span>{error}</span>
+          <span>{error || serviceError}</span>
           <button onClick={() => window.location.reload()}>重新加载</button>
           <button aria-label="关闭提示" onClick={() => setError("")}>
             <X size={17} />
@@ -204,57 +210,58 @@ function App() {
           <LoaderCircle className="spin" size={16} /> 正在处理，请稍候…
         </div>
       )}
-      <main>
-        <PageBoundary key={path}>
+      <main className={publicHome ? undefined : "app-main"}>
+        <PageBoundary key={`${user?.id || "guest"}:${path}`}>
           <Suspense fallback={<Loading />}>
-            {!ready ? (
-              <Loading />
-            ) : nav === "privacy" ? <PrivacyInfo /> : path === "/" && !user ? (
+            {nav === "experience" ? (
+              routeId ? <ProjectInterview id={routeId} example fromHistory={projectQuery.get("from") === "history"} {...props} /> :
+              ["quick", "legacy"].includes(projectQuery.get("mode") || "") ? <Experience /> :
+              <ExampleProjects preferred={projectQuery.get("sample")} {...props} />
+            ) : publicHistory ? (
+              historyOverview && !ready ? <Loading /> :
+                <History example={exampleHistory} signedIn={!!user} projectId={historyProjectId} roundId={exampleRoundId} {...props} />
+            ) : nav === "privacy" ? <PrivacyInfo /> : publicHome ? (
               <Home
+                backendReady={!!config}
                 onStart={() => {
                   sessionStorage.setItem("auth:return", "/projects/new");
                   go("/login");
                 }}
               />
-            ) : !user || path === "/login" ? (
+            ) : !ready ? <Loading /> : !user || path === "/login" ? (
               <Login
                 {...props}
                 onLogin={(u) => {
+                  syncSessionUser(u.id);
                   setUser(u);
                   const next =
                     sessionStorage.getItem("auth:return") || "/projects";
                   sessionStorage.removeItem("auth:return");
                   go(
-                    location.pathname === "/payment-return"
-                      ? "/payment-return"
-                      : /^\/(projects|trainings|report|shop|history)(\/|$)/.test(
-                            next,
-                          )
-                        ? next
-                        : "/projects",
+                    /^\/(projects|trainings|report|history)(\/|$)/.test(next)
+                      ? next
+                      : "/projects",
                   );
                 }}
               />
             ) : nav === "account" ? <Account {...props} /> : path === "/" || nav === "projects" ? (
-              path === "/" || path === "/projects" ? (
+              route === "/" || route === "/projects" ? (
                 <Workspace {...props} />
+              ) : route === "/projects/new" ? (
+                <NewProject {...props} />
+              ) : projectRoundId ? (
+                <Loading />
+              ) : projectQuery.get("interview") === "1" ? (
+                <ProjectInterview key={path} id={routeId} fromHistory={projectQuery.get("from") === "history"} {...props} />
               ) : (
-                <Editor key={path} id={path.split("/")[2]} {...props} />
+                <Editor key={path} id={routeId} {...props} />
               )
             ) : nav === "trainings" ? (
-              <Interview key={path} id={path.split("/")[2]} {...props} />
+              <Interview key={path} id={routeId} {...props} />
             ) : nav === "report" ? (
-              <ReportPage key={path} id={path.split("/")[2]} {...props} />
-            ) : nav === "shop" ? (
-              <ShopPage {...props} />
-            ) : nav === "payment-return" ? (
-              <PaymentReturn
-                {...props}
-                configured={config?.paymentConfigured || false}
-                mode={config?.paymentMode || ""}
-              />
+              <ReportPage key={path} id={routeId} {...props} />
             ) : nav === "history" ? (
-              <History {...props} />
+              <History signedIn projectId={routeId} roundId={historyRoundId} {...props} />
             ) : (
               <Empty
                 title="页面不存在"
@@ -265,12 +272,6 @@ function App() {
           </Suspense>
         </PageBoundary>
       </main>
-      <footer>
-        <span>项目追问官</span>
-        <a href="#/privacy">隐私与服务说明</a>
-        <span>每一次追问，都离讲明白更近一步。</span>
-        <small>练习反馈仅供参考，不承诺面试或录用结果。</small>
-      </footer>
     </>
   );
 }

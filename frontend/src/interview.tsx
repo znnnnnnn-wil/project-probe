@@ -61,7 +61,8 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
     };
   }, [load, run]);
   const turn = t?.turns[t.turns.length - 1];
-  const { answer, edit: setAnswer, notice: draftNotice, localCopy, restoreLocal } = useAnswerDraft(id, turn?.id, t?.status === "ACTIVE");
+  const questionVersion = turn?.questionVersion || 0;
+  const { answer, edit: setAnswer, notice: draftNotice, localCopy, restoreLocal } = useAnswerDraft(id, turn?.id, t?.status === "ACTIVE", questionVersion);
   useEffect(() => {
     if (t && ["GENERATING", "PENDING"].includes(t.status)) {
       let cancelled = false;
@@ -191,13 +192,13 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
           {t.status === "ACTIVE" && turn ? (
             <><TrainingHelp training={t} run={run} busy={busy || voiceBusy} onUpdated={setT} onUnknown={() => {
               if (!answer.trim() || window.confirm("将以暂时不会提交本题，已有草稿不会作为回答提交。确认继续？"))
-                action("answer", { turnId: turn.id, answer: "暂时不会，这部分需要补充。" });
+                action("answer", { turnId: turn.id, questionVersion, answer: "暂时不会，这部分需要补充。" });
             }} /><form
               className="panel answer-panel"
               onSubmit={(e) => {
                 e.preventDefault();
                 if (voiceBusy) return;
-                action("answer", { turnId: turn.id, answer });
+                action("answer", { turnId: turn.id, questionVersion, answer });
               }}
             >
               <label>
@@ -220,9 +221,10 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
                 />
               </label>
               <VoiceInput
-                key={turn.id}
+                key={`${turn.id}:${questionVersion}`}
                 trainingId={id}
                 turnId={turn.id}
+                questionVersion={questionVersion}
                 disabled={busy}
                 remaining={6000 - answer.length - (answer.trim() ? 1 : 0)}
                 onBusy={setVoiceBusy}
@@ -277,7 +279,7 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
                 {t.status === "FAILED"
                   ? "生成遇到问题，回答仍在"
                   : "REFUNDED" === t.status
-                    ? "次数已返还，记录仍保留"
+                    ? "训练已终止，记录仍保留"
                     : "正在准备下一步"}
               </h3>
               <p>
@@ -294,16 +296,6 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
                     onClick={() => action("retry")}
                   >
                     <RefreshCw size={16} /> 重试 / 恢复生成
-                  </Button>
-                  <Button
-                    secondary
-                    disabled={
-                      busy ||
-                      (t.status === "GENERATING" && t.leaseUntil > Date.now())
-                    }
-                    onClick={() => action("refund")}
-                  >
-                    终止并返还本次次数
                   </Button>
                 </div>
               )}

@@ -13,8 +13,8 @@ export function FeedbackForm({ run, busy }: Actions) {
     api<Feedback[]>("/feedback", "GET", undefined, controller.signal).then(setItems).catch(() => {});
     return () => controller.abort();
   }, []);
-  return <section className="panel"><h2>问题与售后反馈</h2><p>反馈保存在站内，可在这里查看处理回复；不发送外部消息。不填写密码、恢复码或支付凭据。</p>
-    <TrainingSelect label="反馈类型" value={kind} onChange={setKind} disabled={busy} options={[{ value: "GENERAL", label: "产品体验" }, { value: "PAYMENT", label: "订单与支付" }, { value: "ACCOUNT", label: "账户与数据" }]} />
+  return <section className="panel"><h2>问题反馈</h2><p>可以在这里查看处理回复。请勿填写密码或恢复码。</p>
+    <TrainingSelect label="反馈类型" value={kind} onChange={setKind} disabled={busy} options={[{ value: "GENERAL", label: "产品体验" }, { value: "ACCOUNT", label: "账户与数据" }]} />
     <label>问题描述<textarea rows={3} value={detail} maxLength={2000} onChange={e => setDetail(e.target.value)} /></label>
     <label>请求编号（可选）<input value={requestId} maxLength={36} onChange={e => setRequestId(e.target.value)} /></label>
     <Button disabled={busy || !detail.trim()} onClick={() => run(async () => {

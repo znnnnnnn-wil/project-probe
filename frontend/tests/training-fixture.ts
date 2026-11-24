@@ -14,8 +14,6 @@ export async function trainingFixture(page: Page) {
   const project = await post("/projects", demoProject);
   const facts = await post(`/projects/${project.id}/extract`);
   await post(`/projects/${project.id}/confirm`, facts);
-  const order = await post("/orders", { requestKey: crypto.randomUUID() });
-  await post(`/orders/${order.id}/mock-pay`);
   const training: Training = await post("/trainings", { projectId: project.id, requestKey: crypto.randomUUID() });
   return { project, training, post };
 }

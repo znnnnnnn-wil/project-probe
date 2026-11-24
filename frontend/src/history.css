@@ -1,0 +1,146 @@
+.practice-history-page .page-head {
+  margin-bottom: 26px;
+}
+
+.practice-history-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  color: var(--blue);
+  font-weight: 600;
+}
+
+.practice-history-back:hover {
+  text-decoration: underline;
+}
+
+.practice-history-projects,
+.practice-history-rounds {
+  padding: 0 24px;
+}
+
+.practice-history-project {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 22px 0;
+  color: var(--ink);
+}
+
+.practice-history-project:not(:last-child),
+.practice-history-round:not(:last-child) {
+  border-bottom: 1px solid var(--line);
+}
+
+.practice-history-project h2,
+.practice-history-round h2 {
+  margin: 0;
+  font-size: 1.125rem;
+  overflow-wrap: anywhere;
+}
+
+.practice-history-project:hover h2,
+.practice-history-project > svg {
+  color: var(--blue);
+}
+
+.practice-history-project p,
+.practice-history-meta {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: .875rem;
+}
+
+.practice-history-round {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 16px;
+  padding: 22px 0;
+}
+
+.practice-history-project-title,
+.practice-history-round-title,
+.practice-history-meta,
+.practice-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.practice-history-meta {
+  overflow-wrap: anywhere;
+}
+
+.practice-history-meta > * + *::before {
+  content: "·";
+  margin-right: 12px;
+}
+
+.practice-history-actions {
+  justify-content: flex-end;
+  align-self: center;
+}
+
+.practice-history-outcome {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  font-size: .875rem;
+}
+
+.practice-history-outcome > strong {
+  color: var(--blue);
+}
+
+.practice-history-outcome p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.practice-history-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.practice-history-page .history-legacy {
+  margin-top: 16px;
+  padding-block: 16px;
+}
+
+.history-legacy > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.history-legacy[open] > summary {
+  margin-bottom: 14px;
+}
+
+@media (max-width: 720px) {
+  .practice-history-projects,
+  .practice-history-rounds {
+    padding: 0 16px;
+  }
+
+  .practice-history-round,
+  .practice-history-project {
+    gap: 10px;
+    padding: 16px 0;
+  }
+
+  .practice-history-round {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .practice-history-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}

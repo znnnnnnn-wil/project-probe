@@ -2,8 +2,10 @@ package com.projectprobe;
 
 import java.util.Map;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @RestControllerAdvice
 public class Errors {
@@ -46,8 +48,22 @@ public class Errors {
 
   @ExceptionHandler(ResponseStatusException.class)
   ResponseEntity<?> expected(ResponseStatusException e) {
-    return ResponseEntity.status(e.getStatusCode()).body(
+    var response = ResponseEntity.status(e.getStatusCode());
+    if (e.getStatusCode().value() == 429 || e.getStatusCode().value() == 503) response.header("Retry-After", "3");
+    return response.body(
       Map.of("message", e.getReason() == null ? "请求失败" : e.getReason())
+    );
+  }
+
+  @ExceptionHandler(NoResourceFoundException.class)
+  ResponseEntity<?> missingPath() {
+    return ResponseEntity.status(404).body(Map.of("message", "请求地址不存在"));
+  }
+
+  @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+  ResponseEntity<?> unsupportedMethod(HttpRequestMethodNotSupportedException e) {
+    return ResponseEntity.status(405).headers(e.getHeaders()).body(
+      Map.of("message", "请求方法不支持")
     );
   }
 

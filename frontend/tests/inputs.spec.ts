@@ -28,8 +28,6 @@ async function seed(page: Page) {
     version: project.version,
     facts: project.facts,
   });
-  const order = await post("/orders", { requestKey: crypto.randomUUID() });
-  await post("/orders/" + order.id + "/mock-pay");
   const training = await post("/trainings", {
     projectId: project.id,
     requestKey: crypto.randomUUID(),
@@ -41,15 +39,13 @@ async function seed(page: Page) {
         modelName: "private-model-name",
         speechEnabled: true,
         resumeImportEnabled: true,
-        paymentMode: "mock",
-        paymentConfigured: true,
       },
     }),
   );
   return { training, project };
 }
 for (const width of [1440, 390]) {
-  test(`简历识别选项目、自动填入与保存 ${width}`, async ({ page }) => {
+  test(`简历识别多个项目、自动填入与批量保存 ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 });
     await seed(page);
     let requests = 0;
@@ -58,6 +54,7 @@ for (const width of [1440, 390]) {
       name: "简历合成预约项目",
       resume: "简历合成预约项目：我实现预约接口。",
       responsibility: "我实现预约接口。",
+      architecture: "", implementation: "", problems: "", verification: "", materials: "",
     };
     await page.route("**/api/resume/import", (route) => {
       requests++;
@@ -70,10 +67,8 @@ for (const width of [1440, 390]) {
       });
     });
     await page.goto("/#/projects/new");
-    await expect(page.locator(".mode-strip")).not.toContainText("真实 AI");
-    await expect(page.locator(".mode-strip")).not.toContainText(
-      "private-model-name",
-    );
+    await page.getByRole("button", { name: "上传简历", exact: true }).click();
+    await expect(page.getByText("private-model-name")).toHaveCount(0);
     await expect(
       page.getByRole("button", { name: "导入简历", exact: true }),
     ).toBeDisabled();
@@ -87,7 +82,8 @@ for (const width of [1440, 390]) {
       mimeType: "text/plain",
       buffer: Buffer.from(candidate.resume),
     });
-    await expect(page.locator(".resume-candidate")).toHaveCount(2);
+    const imported = page.locator("fieldset.imported-project");
+    await expect(imported).toHaveCount(2);
     await page.getByLabel("上传简历文件").setInputFiles({
       name: "renamed.txt",
       mimeType: "text/plain",
@@ -95,28 +91,29 @@ for (const width of [1440, 390]) {
     });
     await expect(page.getByText(/这份简历已上传过/)).toBeVisible();
     await expect(page.getByText(/验证方式缺少可靠原文定位/)).toBeVisible();
-    await expect(page.locator(".resume-candidate")).toHaveCount(2);
-    await page
-      .locator(".resume-candidate")
-      .first()
-      .getByRole("button", { name: "使用这个项目" })
-      .click();
-    await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(
-      candidate.name,
-    );
+    await expect(imported).toHaveCount(2);
     await expect(
-      page.getByLabel("个人职责（必填）", { exact: true }),
-    ).toHaveValue(candidate.responsibility);
+      imported.first().getByLabel("项目名称", { exact: true }),
+    ).toHaveValue(candidate.name);
+    await expect(
+      imported.first().getByRole("textbox", { name: "项目经历", exact: true }),
+    ).toHaveValue(candidate.resume + "\n\n个人职责\n" + candidate.responsibility);
+    const secondName = imported.nth(1).getByLabel("项目名称", { exact: true });
+    await expect(secondName).toHaveValue("第二个合成项目");
+    await secondName.fill("第二个合成项目（已编辑）");
     await page.screenshot({
       path: `test-results/resume-import-${width}.png`,
       fullPage: true,
     });
-    await page.getByRole("button", { name: "保存项目材料" }).click();
-    await expect(page).toHaveURL(/#\/projects\/[a-f0-9-]+$/);
+    await page.getByRole("button", { name: "保存 2 个项目", exact: true }).click();
+    await expect(page).toHaveURL(/#\/projects$/);
     await page.reload();
-    await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(
-      candidate.name,
-    );
+    await expect(
+      page.getByRole("heading", { name: candidate.name, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name: "第二个合成项目（已编辑）", exact: true }),
+    ).toBeVisible();
     expect(requests).toBe(2);
     expect(
       await page.evaluate(
@@ -196,6 +193,7 @@ test("简历失败可重试、原草稿不被覆盖", async ({ page }) => {
   });
   await page.goto("/#/projects/new");
   await page.getByLabel("项目名称", { exact: true }).fill("原草稿");
+  await page.getByRole("button", { name: "上传简历", exact: true }).click();
   await page
     .getByRole("checkbox", {
       name: "同意将简历文字发送至模型服务，并在本账号缓存识别结果30天",
@@ -210,6 +208,7 @@ test("简历失败可重试、原草稿不被覆盖", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("识别暂不可用");
   await page.getByLabel("上传简历文件").setInputFiles(file);
   await expect(page.getByRole("alert")).toContainText("未识别到项目经历");
+  await page.getByRole("button", { name: "手动填写", exact: true }).click();
   await expect(page.getByLabel("项目名称", { exact: true })).toHaveValue(
     "原草稿",
   );

@@ -5,6 +5,30 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class QuestionCoverageTest {
+  @Test void reservesFourScoringDimensionsBeforeTheLastPracticeQuestion() {
+    var model = new ModelService(null, "live", "https://never-called.invalid", "synthetic", "synthetic", "test");
+    var turns = new ArrayList<Map<String, Object>>();
+    var body = new LinkedHashMap<String, Object>(Map.of("kind", "PRACTICE", "maxTurns", 5, "turns", turns,
+      "interviewTopic", "文档切分"));
+    for (String dimension : List.of("个人职责", "表达清晰度", "技术深度", "验证与边界", "查漏补缺")) {
+      var input = model.questionInput(body);
+      assertTrue(((String) input.get("practiceScoringFocus")).startsWith(dimension));
+      assertEquals("文档切分", input.get("interviewTopic"));
+      turns.add(Map.of("answer", "本轮回答"));
+    }
+    body.put("kind", "RETEST");
+    assertFalse(model.questionInput(body).containsKey("practiceScoringFocus"));
+  }
+
+  @Test void unknownFrameworkAssertionsAreRejectedButOpenQuestionsAreAllowed() {
+    var body = new LinkedHashMap<String, Object>(Map.of("project", Map.of("stack", "Spring Boot / PostgreSQL", "implementation", "Repository查询库存")));
+    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> QuestionCoverage.validatePremise("请说明你使用的JPA事务边界。", body));
+    QuestionCoverage.validatePremise("请说明Repository实际如何访问PostgreSQL。", body);
+    QuestionCoverage.validatePremise("你是否使用JPA处理事务？", body);
+    QuestionCoverage.validatePremise("假设使用Redis，缓存失效时怎样处理？", body);
+    body.put("turns", List.of(Map.of("answer", "我用JPA访问数据库")));
+    QuestionCoverage.validatePremise("请说明你使用的JPA事务边界。", body);
+  }
   @Test void explicitCompoundPromptsAreRejectedWithoutRejectingOneRequest() {
     assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> QuestionCoverage.validateBurden(
       "请说明幂等键如何生成、在哪一层判断冲突，以及重复请求返回什么结果。"));
@@ -30,16 +54,6 @@ class QuestionCoverageTest {
     assertTrue(QuestionCoverage.nearDuplicate(original, original.replace("请说明", "说明")));
     assertFalse(QuestionCoverage.nearDuplicate("请求在1.5秒后超时时如何观察和验证最终状态？", "请求在15秒后超时时如何观察和验证最终状态？"));
     assertFalse(QuestionCoverage.nearDuplicate(original, "如果下游已经成功但响应丢失，重试将如何处理？"));
-  }
-  @Test void repeatedImplementationGoalsNeedAnExplicitNewCondition() {
-    var body = new LinkedHashMap<String, Object>(Map.of("turns", List.of(Map.of(
-      "question", "Repository方法签名是什么？", "topic", "查询实现", "answer", "尚未说明"), Map.of(
-      "question", "Repository查询是如何实现的？", "topic", "查询实现", "answer", "仍未解释"))));
-    var repeated = Map.<String, Object>of("question", "你用Spring Data派生查询还是自定义SQL？", "topic", "查询方式");
-    assertThrows(org.springframework.web.server.ResponseStatusException.class, () -> QuestionCoverage.validateGoal(repeated, body));
-    QuestionCoverage.validateGoal(Map.of("question", "假设书号字段改为字符串，自定义SQL的入参该如何处理？", "topic", "查询实现",
-      "changedCondition", "书号字段改为字符串"), body);
-    QuestionCoverage.validateGoal(Map.of("question", "如何用断言验证返回的库存值？", "topic", "验证方法"), body);
   }
   @Test void recognizedRetestTargetsCannotDriftToAnotherGoal() {
     var body = new LinkedHashMap<String, Object>(Map.of("kind", "RETEST", "focus", "事务边界"));

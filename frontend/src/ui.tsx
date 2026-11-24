@@ -35,7 +35,7 @@ export const statusLabel: Record<string, string> = {
   GENERATING: "生成中",
   FAILED: "可重试",
   COMPLETED: "已完成",
-  REFUNDED: "已返还",
+  REFUNDED: "已终止",
 };
 export function Button({
   children,

@@ -1,0 +1,243 @@
+.practice-retest {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding-top: 24px;
+  border-top: 1px solid var(--line);
+}
+
+.practice-retest-header h3 {
+  margin: 0 0 4px;
+  color: var(--ink);
+  font-size: 19px;
+}
+
+.practice-retest-header p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.practice-retest-options {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.practice-retest-options legend {
+  margin: 0 0 8px;
+  padding: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.practice-retest-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 245px), 1fr));
+  gap: 10px;
+}
+
+.practice-retest-choice {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 13px 14px;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  cursor: pointer;
+}
+
+.practice-retest-choice > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.practice-retest-choice:hover:not(:has(input:disabled)) {
+  border-color: var(--blue);
+}
+
+.practice-retest-choice:has(input:focus-visible) {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.practice-retest-choice:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.practice-retest-choice:has(input:checked) {
+  color: var(--blue-deep);
+  background: var(--blue-100);
+  border-color: var(--blue);
+}
+
+.practice-retest-choice-marker {
+  inline-size: 16px;
+  block-size: 16px;
+  margin-top: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.practice-retest-choice:has(input:checked) .practice-retest-choice-marker {
+  border: 5px solid var(--blue);
+}
+
+.practice-retest-choice-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.practice-retest-choice-body strong {
+  font-size: 13px;
+}
+
+.practice-retest-choice-question {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.practice-retest-prompt,
+.practice-retest-answer,
+.practice-retest-form,
+.practice-retest-comparison {
+  min-width: 0;
+  padding: clamp(14px, 2vw, 20px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  overflow-wrap: anywhere;
+}
+
+.practice-retest-prompt {
+  border-inline-start: 3px solid var(--blue-400);
+  background: var(--soft);
+}
+
+.practice-retest-prompt .practice-retest-topic {
+  margin: 0 0 6px;
+  color: var(--blue-deep);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.practice-retest-prompt h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.practice-retest-task {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  margin: 10px 0 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.practice-retest-task strong {
+  color: var(--blue-deep);
+}
+
+.practice-retest-task span {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.practice-retest-response {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 14px;
+}
+
+.practice-retest-answer {
+  background: var(--soft);
+}
+
+.practice-retest-answer.is-revised,
+.practice-retest-form {
+  background: var(--paper);
+}
+
+.practice-retest-answer h4,
+.practice-retest-comparison h4 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.practice-retest-answer p,
+.practice-retest-comparison p {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.practice-retest-form > label {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.practice-retest-form textarea {
+  min-height: 132px;
+  font-weight: 400;
+}
+
+.practice-retest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.practice-retest-form > label + .practice-retest-actions {
+  margin-top: 12px;
+}
+
+.practice-retest-error {
+  margin: 8px 0 0;
+  color: #9c503d;
+  font-size: 13px;
+}
+
+.practice-retest-comparison {
+  background: var(--blue-100);
+}
+
+.practice-retest-comparison small {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+@media (max-width: 680px) {
+  .practice-retest-response {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

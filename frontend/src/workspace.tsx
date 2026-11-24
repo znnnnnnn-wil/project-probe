@@ -1,52 +1,33 @@
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ArrowRight,
-  Check,
   FolderOpen,
   MessageSquare,
   Plus,
   Search,
   RefreshCw,
-  CreditCard,
+  Trash2,
 } from "lucide-react";
 import { api, go } from "./api";
-import type { ProjectSummary, TrainingSummary, Shop } from "./types";
-import { trainingQuota } from "./quota";
-
-export function purchaseFrom(projectId?: string) {
-  if (projectId) sessionStorage.setItem("purchase:project", projectId);
-  else sessionStorage.removeItem("purchase:project");
-  go("/shop");
-}
-
-export function purchaseProject(orderId?: string) {
-  const id =
-    sessionStorage.getItem(
-      orderId ? "purchase:order:" + orderId : "purchase:project",
-    ) || "";
-  return /^[a-f0-9-]{36}$/.test(id) ? id : "";
-}
+import type { ProjectSummary, TrainingSummary } from "./types";
 
 export function Workspace({
   run,
-  busy,
 }: {
   run: (fn: () => Promise<void>) => Promise<void>;
-  busy: boolean;
 }) {
   const [data, setData] = useState<{
     projects: ProjectSummary[];
     trainings: TrainingSummary[];
-    shop: Shop;
-    activeCount: number;
-    completedCount: number;
   } | null>(null);
   const [query, setQuery] = useState("");
-  const [filter, setFilter] = useState("全部");
+  const [deleting, setDeleting] = useState<ProjectSummary | null>(null);
+  const [notice, setNotice] = useState("");
+  const search = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     run(async () => {
-      const [projects, overview, shop] = await Promise.all([
+      const [projects, overview] = await Promise.all([
         api<ProjectSummary[]>(
           "/projects?summary=true",
           "GET",
@@ -55,18 +36,12 @@ export function Workspace({
         ),
         api<{
           items: TrainingSummary[];
-          activeCount: number;
-          completedCount: number;
         }>("/training-overview", "GET", undefined, controller.signal),
-        api<Shop>("/shop?summary=true", "GET", undefined, controller.signal),
       ]);
       if (!controller.signal.aborted)
         setData({
           projects,
           trainings: overview.items,
-          shop,
-          activeCount: overview.activeCount,
-          completedCount: overview.completedCount,
         });
     });
     return () => controller.abort();
@@ -75,14 +50,9 @@ export function Workspace({
     data?.trainings.filter(
       (t) => !["COMPLETED", "REFUNDED"].includes(t.status),
     ) || [];
-  const balance = trainingQuota(data?.shop);
-  const quota = balance.unlimited ? "不限次数" : balance.deepAvailable;
   const projects =
     data?.projects.filter(
-      (p) =>
-        (p.name + " " + p.stack).toLowerCase().includes(query.toLowerCase()) &&
-        (filter === "全部" ||
-          (filter === "待核对" ? !p.factsConfirmed : p.factsConfirmed)),
+      (p) => (p.name + " " + p.stack).toLowerCase().includes(query.trim().toLowerCase()),
     ) || [];
   return (
     <section className="page workspace-page">
@@ -97,19 +67,24 @@ export function Workspace({
           新建项目
         </button>
       </div>
-      <div className="workspace-stats" aria-label="练习概览">
-        {[
-          ["项目档案", data?.projects.length],
-          ["待继续训练", data?.activeCount],
-          ["已完成报告", data?.completedCount],
-          ["可用深挖", quota],
-        ].map(([name, value]) => (
-          <div key={name}>
-            <span>{name}</span>
-            <strong>{data ? value : "—"}</strong>
-          </div>
-        ))}
-      </div>
+      {notice && <p role="status">{notice}</p>}
+      {deleting && <DeleteProjectDialog project={deleting} onCancel={() => setDeleting(null)} onDeleted={() => {
+        const projectId = deleting.id!;
+        for (const prefix of ["project-draft:", "project:expand:", "practice-draft:", "practice-draft-turn:", "practice-draft-exchange:", "practice-review:"])
+          sessionStorage.removeItem(prefix + projectId);
+        const trainingIds = data!.trainings.filter(t => t.project.id === projectId).map(t => t.id);
+        for (const key of Object.keys(sessionStorage)) {
+          if (trainingIds.some(id => key.startsWith("draft:" + id + ":") || key.startsWith("plan-draft:" + id + ":")))
+            sessionStorage.removeItem(key);
+        }
+        setData(current => current && ({
+          projects: current.projects.filter(p => p.id !== projectId),
+          trainings: current.trainings.filter(t => t.project.id !== projectId),
+        }));
+        setNotice(`已删除“${deleting.name}”及其训练内容。`);
+        setDeleting(null);
+        search.current?.focus();
+      }} />}
       {!data ? (
         <div className="empty" role="status">
           正在读取工作台…
@@ -150,23 +125,12 @@ export function Workspace({
               ))}
             </section>
           )}
-          <div className="workspace-content">
             <section className="project-index">
               <div className="index-toolbar">
-                <div className="segmented" aria-label="项目状态">
-                  {["全部", "待核对", "已核对"].map((v) => (
-                    <button
-                      key={v}
-                      aria-pressed={v === filter}
-                      onClick={() => setFilter(v)}
-                    >
-                      {v}
-                    </button>
-                  ))}
-                </div>
                 <label className="search-field">
                   <Search size={16} />
                   <input
+                    ref={search}
                     aria-label="搜索项目"
                     placeholder="搜索名称、技术栈"
                     value={query}
@@ -191,7 +155,7 @@ export function Workspace({
                     className="button secondary"
                     onClick={() =>
                       data.projects.length
-                        ? (setQuery(""), setFilter("全部"))
+                        ? setQuery("")
                         : go("/projects/new")
                     }
                   >
@@ -204,23 +168,14 @@ export function Workspace({
                   const latest = data.trainings.find(
                     (t) => t.project.id === p.id && t.status !== "REFUNDED",
                   );
-                  const ongoing = data.trainings.find(
-                    (t) =>
-                      t.project.id === p.id &&
-                      !["COMPLETED", "REFUNDED"].includes(t.status),
-                  );
-                  const next = ongoing
-                    ? "/trainings/" + ongoing.id
-                    : "/projects/" + p.id;
+                  const projectPath = "#/projects/" + p.id;
                   return (
                     <article className="project-row" key={p.id}>
                       <span className="project-mark">
                         <FolderOpen size={21} />
                       </span>
                       <div className="project-info">
-                        <a href={"#/projects/" + p.id}>
-                          <h2>{p.name}</h2>
-                        </a>
+                        <h2>{p.name}</h2>
                         <p>{p.background || "尚未补充项目背景"}</p>
                         <div className="tags">
                           {p.stack
@@ -231,35 +186,13 @@ export function Workspace({
                               <span key={i}>{tag.trim()}</span>
                             ))}
                         </div>
-                        <small>
-                          {latest
-                            ? (latest.kind === "RETEST"
-                                ? "最近复测"
-                                : "最近深挖") +
-                              " · " +
-                              new Date(latest.createdAt).toLocaleDateString(
-                                "zh-CN",
-                              )
-                            : "尚未开始训练"}
-                        </small>
                       </div>
                       <div className="project-actions">
-                        <span
-                          className={
-                            "badge " + (p.factsConfirmed ? "confirmed" : "")
-                          }
-                        >
-                          {p.factsConfirmed ? <Check size={12} /> : null}
-                          {p.factsConfirmed ? "事实已核对" : "待核对事实"}
-                        </span>
-                        <a className="text-link" href={"#" + next}>
-                          {ongoing
-                            ? "继续训练"
-                            : p.factsConfirmed
-                              ? "进入项目"
-                              : "整理材料"}
+                        <a className="button secondary" href={projectPath + "?interview=1"}>
+                          进入面试室
                           <ArrowRight size={15} />
                         </a>
+                        <a className="minor-link" href={projectPath}>编辑材料</a>
                         {latest?.status === "COMPLETED" && (
                           <a
                             href={"#/report/" + latest.id}
@@ -268,40 +201,77 @@ export function Workspace({
                             查看最近报告
                           </a>
                         )}
+                        <button type="button" className="project-delete-link" aria-haspopup="dialog" onClick={() => {
+                          setNotice("");
+                          setDeleting(p);
+                        }}>
+                          <Trash2 size={14} aria-hidden="true" />删除项目
+                        </button>
                       </div>
                     </article>
                   );
                 })
               )}
             </section>
-            <aside className="workspace-aside">
-              <CreditCard size={21} />
-              <h2>训练权益</h2>
-              <div className="quota-number">
-                {quota}
-                <small>次深挖可用</small>
-              </div>
-              <p>新套餐的深挖与复测共用次数。继续已有训练不重复消耗次数。</p>
-              <button
-                className="button secondary"
-                disabled={busy}
-                onClick={() => purchaseFrom()}
-              >
-                训练包与订单
-                <ArrowRight size={15} />
-              </button>
-              <hr />
-              <h3>下一步</h3>
-              <ol className="workflow-list">
-                <li>保存项目材料</li>
-                <li>核对原文与事实边界</li>
-                <li>回答连续项目追问</li>
-                <li>补充任务后关联复测</li>
-              </ol>
-            </aside>
-          </div>
         </>
       )}
     </section>
   );
+}
+
+function DeleteProjectDialog({ project, onCancel, onDeleted }: {
+  project: ProjectSummary;
+  onCancel: () => void;
+  onDeleted: () => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  useLayoutEffect(() => {
+    const element = dialog.current!;
+    element.showModal();
+    cancel.current!.focus();
+    return () => element.close();
+  }, []);
+  return <dialog ref={dialog} className="project-delete-dialog" aria-labelledby="project-delete-title"
+    aria-describedby="project-delete-description" onCancel={event => {
+      event.preventDefault();
+      if (!busy) onCancel();
+    }}>
+    <form aria-busy={busy} onSubmit={async event => {
+      event.preventDefault();
+      if (busy || !password || confirmation !== project.name) return;
+      setBusy(true);
+      setError("");
+      try {
+        await api("/projects/" + encodeURIComponent(project.id!), "DELETE", { password, confirmation });
+      } catch (failure) {
+        setError(failure instanceof Error ? failure.message : "删除失败，请稍后重试。");
+        setBusy(false);
+        return;
+      }
+      dialog.current!.close();
+      onDeleted();
+    }}>
+      <span className="project-delete-icon"><Trash2 size={24} aria-hidden="true" /></span>
+      <h2 id="project-delete-title">删除项目</h2>
+      <p className="project-delete-name">{project.name}</p>
+      <p id="project-delete-description">项目材料、修订、全部面试问答、报告和草稿将一并永久删除，无法恢复。其他项目不受影响。</p>
+      <label htmlFor="project-delete-password">当前密码</label>
+      <input id="project-delete-password" type="password" autoComplete="current-password" required
+        disabled={busy} value={password} onChange={event => setPassword(event.target.value)} />
+      <label htmlFor="project-delete-confirmation">输入完整项目名称以确认</label>
+      <input id="project-delete-confirmation" autoComplete="off" required disabled={busy}
+        value={confirmation} onChange={event => setConfirmation(event.target.value)} />
+      {error && <p className="project-delete-error" role="alert">{error}</p>}
+      <div className="project-delete-actions">
+        <button ref={cancel} type="button" className="button secondary" disabled={busy} onClick={onCancel}>取消</button>
+        <button type="submit" className="button project-delete-confirm"
+          disabled={busy || !password || confirmation !== project.name}>{busy ? "正在删除…" : "永久删除项目"}</button>
+      </div>
+    </form>
+  </dialog>;
 }

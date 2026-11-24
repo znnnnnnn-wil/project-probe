@@ -13,10 +13,11 @@ export function TrainingHelp({ training, run, busy, onUpdated, onUnknown }: Acti
   const [notice, setNotice] = useState("");
   const send = (action: string) => run(async () => {
     const result = await api<Training>(`/trainings/${training.id}/support`, "POST", {
-      turnId: training.turns.at(-1)?.id, kind: action, detail, requestKey: crypto.randomUUID(),
+      turnId: training.turns.at(-1)?.id, questionVersion: training.turns.at(-1)?.questionVersion || 0,
+      kind: action, detail, requestKey: crypto.randomUUID(),
     });
     onUpdated(result); setDetail("");
-    setNotice(action === "FEEDBACK" ? "问题反馈已保存。" : "题目已调整，已有草稿保留；不额外扣次数。");
+    setNotice(action === "FEEDBACK" ? "问题反馈已保存。" : "题目已调整，已有草稿保留，请核对后再提交。");
   });
   return <details className="panel"><summary>暂时不会、澄清题意或反馈问题</summary>
     <div className="action-row">

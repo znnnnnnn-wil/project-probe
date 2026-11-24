@@ -1,0 +1,384 @@
+/* 登录页与五轮训练共用 3D 面试官；肖像仅作 WebGL 不可用时的兜底。 */
+.avatar-shell {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 17% 21%, #fffdf5b8, transparent 61%),
+    linear-gradient(90deg, transparent 73%, #b7ada126 73.2%, transparent 73.5%),
+    linear-gradient(180deg, #e5e2db 0%, #d7d5ce 73%, #c1beb5 100%);
+}
+/* 磨砂窗和远处木墙只提供景深；所有装饰都位于人物后方。 */
+.avatar-shell::before,
+.avatar-shell::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+.avatar-shell::before {
+  top: -8%;
+  left: -9%;
+  width: 37%;
+  height: 100%;
+  background:
+    linear-gradient(180deg, transparent 32%, #dddcd484 32.2%, #dddcd484 33%, transparent 33.2%, transparent 68%, #dddcd484 68.2%, #dddcd484 69%, transparent 69.2%),
+    repeating-linear-gradient(90deg, #f8f9f1c9 0 28%, #c9ccc1ab 28% 29%, #fffdf4d6 29% 59%, #d2d2c8a6 59% 60%);
+  box-shadow: 16px 0 50px #fdf9ed5c;
+  filter: blur(2px);
+  transform: skewY(-7deg);
+}
+.avatar-shell::after {
+  top: 5%;
+  right: -7%;
+  bottom: 0;
+  width: 26%;
+  background:
+    linear-gradient(180deg, transparent 69%, #b3a59426 69.3%, #c0b3a11f 70%, transparent 70.3%),
+    repeating-linear-gradient(90deg, #c8bca83d 0 7%, #b8a88d2b 7.5% 8%, #d9cfbe40 8.5% 16%);
+  filter: blur(2px);
+  transform: skewY(3deg);
+}
+.avatar-portrait {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 8%;
+  transition: opacity 0.45s;
+}
+.avatar-portrait.is-hidden {
+  opacity: 0;
+}
+.avatar-mount {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.45s;
+}
+.avatar-mount.is-ready {
+  opacity: 1;
+}
+.avatar-mount canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.avatar-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  padding: 16px;
+  text-align: center;
+  color: #47524f;
+  font-size: 12px;
+  background: #f3f0e963;
+}
+
+.auth-stage,
+.live-stage {
+  background:
+    radial-gradient(ellipse at 20% 16%, #fffaf0 0%, transparent 65%),
+    linear-gradient(145deg, #e7e3da 0%, #d7d4ca 58%, #b9b5ac 100%);
+}
+
+/* 登录页左侧舞台 */
+.auth-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 480px;
+}
+.auth-stage-brand {
+  position: absolute;
+  top: clamp(14px, 2vw, 26px);
+  left: clamp(14px, 2vw, 26px);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 750;
+  color: #34413c;
+}
+.auth-caption {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 1;
+  padding: clamp(20px, 3.5vw, 48px);
+  color: #fff;
+  padding-top: clamp(72px, 9vw, 130px);
+  background: linear-gradient(transparent, #28352e96 50%, #22312bdf);
+}
+.auth-caption h1 {
+  margin: 0;
+  font-size: clamp(22px, 2.3vw, 36px);
+  line-height: 1.5;
+  letter-spacing: -0.5px;
+}
+.auth-caption p {
+  max-width: 52ch;
+  margin: 8px 0 0;
+  color: #e8eee7;
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+/* 训练舞台 */
+.live-stage {
+  position: relative;
+  flex: 1;
+  min-height: 420px;
+  border-radius: var(--r-lg);
+  overflow: hidden;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px #6a706015;
+}
+.live-stage::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: 2;
+  inset: 67% 0 0;
+  background: linear-gradient(transparent, #24332c9c);
+}
+.stage-top {
+  position: absolute;
+  left: 19px;
+  top: 18px;
+  right: 19px;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+.live-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #ffffff69;
+  border-radius: 20px;
+  background: #f7f7efcc;
+  backdrop-filter: blur(10px);
+  color: #394f44;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.live-indicator .status-dot {
+  width: 5px;
+  height: 5px;
+  background: #5e876f;
+}
+.stage-subtitle {
+  position: absolute;
+  z-index: 4;
+  bottom: 108px;
+  left: 12%;
+  right: 12%;
+  padding: 10px 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+  background: #23322bba;
+  color: #f3f5ee;
+  border: 1px solid #ffffff17;
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  max-height: 34%;
+  overflow: auto;
+}
+.stage-bottom {
+  position: absolute;
+  left: 23px;
+  right: 23px;
+  bottom: 22px;
+  z-index: 3;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 15px;
+}
+.stage-name strong {
+  font-size: 17px;
+  font-weight: 600;
+  text-shadow: 0 1px 8px #17231e48;
+}
+.stage-name p {
+  font-size: 11px;
+  color: #e3ebe1;
+  margin-top: 4px;
+}
+.camera-box {
+  position: relative;
+  width: 139px;
+  height: 95px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #ffffff45;
+  border-radius: 10px;
+  background: #293b33d9;
+  color: #e5eee2;
+  font-size: 10px;
+  overflow: hidden;
+  text-align: center;
+  padding: 4px;
+}
+.camera-box video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+.camera-caption {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  color: #fff;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #1c2330a0;
+}
+.live-control-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 5px 0 3px;
+}
+.round-control {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line-strong);
+  background: var(--paper);
+  border-radius: 50%;
+  color: #344563;
+}
+.round-control:hover {
+  background: var(--blue-100);
+}
+.round-control[aria-pressed="true"] {
+  background: var(--blue-100);
+  color: var(--blue-deep);
+  border-color: var(--blue-400);
+}
+.control-caption {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  padding-bottom: 3px;
+}
+.media-error {
+  margin: 0;
+  font-size: 12px;
+  color: #9c503d;
+  text-align: center;
+}
+
+/* 训练中布局：左舞台右问答 */
+.practice-stage-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.practice-live-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.practice-body.is-live {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: stretch;
+}
+.question-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.question-progress {
+  height: 3px;
+  flex: 1;
+  border-radius: 2px;
+  background: #dce0ea;
+  overflow: hidden;
+}
+.question-progress span {
+  display: block;
+  height: 100%;
+  background: var(--blue);
+  transition: width 0.3s;
+}
+
+@media (max-width: 900px) {
+  .practice-body.is-live {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .live-stage {
+    flex: none;
+    height: 300px;
+    min-height: 300px;
+  }
+  .stage-subtitle {
+    bottom: 95px;
+    font-size: 11px;
+    left: 9%;
+    right: 9%;
+  }
+  .camera-box {
+    width: 108px;
+    height: 73px;
+  }
+  .stage-name strong {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 740px) {
+  .auth-stage {
+    min-height: 0;
+    height: clamp(210px, 28svh, 280px);
+  }
+  .auth-caption {
+    padding-block: 12px;
+    padding-top: 45px;
+  }
+  .auth-caption p {
+    display: none;
+  }
+  .auth-caption h1 {
+    font-size: 18px;
+  }
+  .stage-top {
+    left: 13px;
+    top: 12px;
+    right: 13px;
+  }
+  .stage-bottom {
+    left: 17px;
+    right: 15px;
+    bottom: 15px;
+  }
+}

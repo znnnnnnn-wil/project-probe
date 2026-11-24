@@ -1,0 +1,314 @@
+/* Design tokens shared by public pages and the project workspace. */
+:root {
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", "Cascadia Code", Consolas, monospace;
+  --ink: #171d2d;
+  --text: #364154;
+  --muted: #59657a;
+  --line: #e1e6ef;
+  --line-strong: #cbd4e3;
+  --paper: #fff;
+  --soft: #f7f8fb;
+  --bg: #f6f8fc;
+
+  --blue: #284ecc;
+  --blue-deep: #1c3aad;
+  --blue-800: #2442a2;
+  --blue-700: var(--blue-deep);
+  --blue-600: var(--blue);
+  --blue-500: var(--blue);
+  --blue-400: #a9baf2;
+  --blue-300: #c7d4fa;
+  --blue-100: #eaf0ff;
+  --amber: #9d6512;
+  --amber-soft: #fff3db;
+
+  --r-sm: 8px;
+  --r-md: 10px;
+  --r-lg: 12px;
+  --shadow-sm: 0 1px 3px rgb(23 29 45 / 5%);
+  --shadow-md: 0 12px 28px rgb(23 29 45 / 10%);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --shell-width: min(1220px, calc(100% - 104px));
+
+  color: var(--ink);
+  color-scheme: light;
+  background: var(--paper);
+  font-family: var(--font-sans);
+}
+
+body {
+  background: var(--paper);
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+#root > main {
+  flex: 1;
+  min-width: 0;
+}
+
+#root:has(> .site-header--public-home) > main {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-main {
+  background: var(--bg);
+}
+
+header.site-header {
+  position: sticky;
+  z-index: 60;
+  top: 0;
+  display: block;
+  width: 100%;
+  max-width: none;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  background: var(--paper);
+  border-bottom: 1px solid var(--line);
+}
+
+.header-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: clamp(28px, 4.5vw, 69px);
+  width: var(--shell-width);
+  min-height: 67px;
+  margin-inline: auto;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.brand-icon {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 33px;
+  height: 33px;
+  color: var(--paper);
+  background: var(--blue);
+  border-radius: 9px;
+  font-size: 17px;
+  line-height: 1;
+}
+
+header.site-header nav {
+  display: flex;
+  align-self: stretch;
+  gap: clamp(21px, 2.8vw, 38px);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+header.site-header nav a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  white-space: nowrap;
+}
+
+header.site-header nav a:hover {
+  color: var(--blue-deep);
+}
+
+header.site-header nav a.selected {
+  color: var(--blue);
+  border-bottom: 0;
+  font-weight: 700;
+}
+
+header.site-header nav a.selected::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
+  background: var(--blue);
+}
+
+.account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.account > a {
+  display: block;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-toggle {
+  display: none;
+}
+
+.account button {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--r-sm);
+}
+
+.account button:hover {
+  background: var(--soft);
+  color: var(--blue-deep);
+}
+
+.account-login {
+  flex-shrink: 0;
+  padding: 8px 13px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line-strong);
+  color: var(--text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.account-login:hover {
+  background: var(--blue-100);
+  border-color: var(--blue-400);
+  color: var(--blue-deep);
+}
+
+.status-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+:where(a, button, input, textarea, select):focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1130px) {
+  :root { --shell-width: calc(100% - 72px); }
+}
+
+@media (max-width: 860px) {
+  .site-header--public-home .header-inner {
+    width: min(650px, calc(100% - 46px));
+  }
+}
+
+@media (max-width: 740px) {
+  :root { --shell-width: calc(100% - 40px); }
+
+  .header-inner {
+    min-height: 60px;
+    gap: 8px;
+  }
+
+  .brand {
+    gap: 8px;
+    font-size: 16px;
+  }
+
+  .brand-icon {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--r-sm);
+  }
+
+  .account {
+    font-size: 12px;
+  }
+
+  .account > a:not(.account-login) {
+    max-width: 100px;
+  }
+
+  .account-login {
+    padding: 7px 10px;
+  }
+
+  .menu-toggle {
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+    order: 3;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-sm);
+  }
+
+  .menu-toggle svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .menu-toggle:hover {
+    color: var(--blue-deep);
+    background: var(--blue-100);
+  }
+
+  header.site-header nav {
+    position: absolute;
+    inset: 100% 0 auto;
+    display: none;
+    flex-direction: column;
+    gap: 4px;
+    width: 100%;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 0 0 var(--r-md) var(--r-md);
+    background: var(--paper);
+    box-shadow: var(--shadow-md);
+  }
+
+  header.site-header nav.open {
+    display: flex;
+  }
+
+  header.site-header nav a {
+    min-height: 42px;
+    padding: 8px 12px;
+    border-radius: var(--r-sm);
+    font-size: 13px;
+  }
+
+  header.site-header nav a.selected {
+    background: var(--blue-100);
+  }
+
+  header.site-header nav a.selected::after {
+    content: none;
+  }
+}
+
+@media (max-width: 560px) {
+  :root { --shell-width: calc(100% - 32px); }
+
+  .site-header--public-home .header-inner {
+    width: var(--shell-width);
+  }
+}

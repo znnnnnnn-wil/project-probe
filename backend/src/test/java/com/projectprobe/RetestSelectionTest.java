@@ -11,23 +11,20 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest(properties = {
   "spring.datasource.url=${PROBE_TEST_DB_URL:jdbc:h2:mem:retest-selection;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}",
   "spring.datasource.username=${PROBE_TEST_DB_USER:sa}", "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
-  "app.model-mode=demo", "app.payment.mode=mock", "app.payment.reconcile-enabled=false"
+  "app.model-mode=demo"
 })
 class RetestSelectionTest {
   @Autowired Store s;
   @Autowired ProjectService projects;
   @Autowired TrainingService trainings;
-  @Autowired PaymentService payments;
 
-  @Test void selectedTopicsAndRepeatedRetestsKeepEntitlementsAndHistory() {
+  @Test void selectedTopicsAndRepeatedRetestsKeepHistory() {
     String user = id();
     s.db.update("INSERT INTO app_users VALUES (?,?,?,?)", user, user, "unused", now());
     var project = projects.save(user, null, Map.of("name", "合成项目", "responsibility", "接口与测试"));
     String projectId = str(project, "id");
     project = projects.extract(user, projectId);
     projects.confirm(user, projectId, project);
-    var order = payments.create(user, Map.of("requestKey", id()));
-    payments.mock(user, str(order, "id"));
     var deep = trainings.start(user, Map.of("requestKey", id(), "projectId", projectId));
     String parent = str(deep, "id");
     var body = s.decode(trainings.row(user, parent).get("body"));
@@ -59,7 +56,6 @@ class RetestSelectionTest {
     assertEquals("并发约束", second.get("focus"));
     assertEquals(second.get("id"), trainings.retestEntry(user, trainings.row(user, parent)).get("trainingId"));
     assertEquals("COMPLETED", trainings.get(user, str(first, "id")).get("status"));
-    var pack = payments.packages(user).get(0);
-    assertEquals(3, ((Number) pack.get("training_used")).intValue());
+    assertEquals(3, s.db.queryForObject("SELECT COUNT(*) FROM trainings WHERE user_id=?", Integer.class, user));
   }
 }

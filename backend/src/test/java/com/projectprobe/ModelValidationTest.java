@@ -18,8 +18,6 @@ import org.springframework.web.server.ResponseStatusException;
     "spring.datasource.username=${PROBE_TEST_DB_USER:sa}",
     "spring.datasource.password=${PROBE_TEST_DB_PASSWORD:}",
     "app.model-mode=demo",
-    "app.payment.mode=mock",
-    "app.payment.reconcile-enabled=false",
   }
 )
 class ModelValidationTest {
@@ -29,9 +27,6 @@ class ModelValidationTest {
 
   @Autowired
   ProjectService projects;
-
-  @Autowired
-  PaymentService payments;
 
   @Autowired
   TrainingService trainings;
@@ -387,8 +382,6 @@ class ModelValidationTest {
     );
     p = projects.extract(u, str(p, "id"));
     p = projects.confirm(u, str(p, "id"), p);
-    var order = payments.create(u, Map.of("requestKey", id()));
-    payments.mock(u, str(order, "id"));
     var t = trainings.start(
       u,
       Map.of("projectId", p.get("id"), "requestKey", id())
@@ -423,7 +416,6 @@ class ModelValidationTest {
       )
     ).generate(u, tid);
     assertEquals("COMPLETED", recovered.get("status"));
-    payments.mock(u, str(payments.create(u, Map.of("requestKey", id())), "id"));
     var another = trainings.start(
       u,
       Map.of("projectId", p.get("id"), "requestKey", id())
@@ -432,6 +424,6 @@ class ModelValidationTest {
     another.put("operation", "REPORT");
     trainings.update(otherId, "PENDING", another);
     assertThrows(ResponseStatusException.class, () -> bad.generate(u, otherId));
-    assertEquals("REFUNDED", trainings.refund(u, otherId).get("status"));
+    assertEquals("FAILED", trainings.get(u, otherId).get("status"));
   }
 }

@@ -1,0 +1,54 @@
+.experience-page {
+  color: var(--ink);
+}
+.probe-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue);
+  margin-bottom: 14px;
+}
+.probe-eyebrow > span,
+.probe-live-dot {
+  width: 6px;
+  height: 6px;
+  display: inline-block;
+  background: var(--blue);
+  border-radius: 50%;
+}
+.probe-text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 0;
+  transition: color 0.16s var(--ease);
+}
+.probe-text-button:hover:not(:disabled) {
+  color: var(--blue-deep);
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+.probe-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--blue-100);
+  color: var(--blue-deep);
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.probe-label {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
