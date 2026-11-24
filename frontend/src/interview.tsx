@@ -64,7 +64,7 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
   const questionVersion = turn?.questionVersion || 0;
   const { answer, edit: setAnswer, notice: draftNotice, localCopy, restoreLocal } = useAnswerDraft(id, turn?.id, t?.status === "ACTIVE", questionVersion);
   useEffect(() => {
-    if (t && ["GENERATING", "PENDING"].includes(t.status)) {
+    if (t && ["GENERATING", "PENDING", "PAYMENT_VERIFYING"].includes(t.status)) {
       let cancelled = false;
       let timer: number;
       const poll = async () => {
@@ -107,6 +107,10 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
     });
   if (!t) return <Loading />;
   const count = t.turns.filter((v) => v.answer).length;
+  const awaitingPayment = t.status === "PAYMENT_PENDING";
+  const verifyingPayment = t.status === "PAYMENT_VERIFYING";
+  const operationPending = ["GENERATING", "PAYMENT_VERIFYING"].includes(t.status) && t.leaseUntil > Date.now();
+  const canRefundCredits = t.legacyRefundEligible && ["FAILED", "PENDING", "GENERATING"].includes(t.status);
   return (
     <section className="page interview-page">
       <PageHead
@@ -276,27 +280,38 @@ export function Interview({ id, run, busy }: Actions & { id: string }) {
           ) : (
             <div className="panel recovery">
               <h3>
-                {t.status === "FAILED"
+                {awaitingPayment
+                  ? "需要训练次数"
+                  : verifyingPayment
+                  ? "正在核对训练次数"
+                  : t.status === "FAILED"
                   ? "生成遇到问题，回答仍在"
                   : "REFUNDED" === t.status
                     ? "训练已终止，记录仍保留"
                     : "正在准备下一步"}
               </h3>
               <p>
-                {t.error ||
-                  "可离开后从训练记录返回。若服务中断，生成任务超时后可恢复。"}
+                {t.error || (awaitingPayment
+                  ? "购买训练包后，返回此页核对次数并继续。"
+                  : verifyingPayment
+                  ? "可以重试核对本轮次数，核对完成后继续生成题目。"
+                  : "可离开后从训练记录返回。若服务中断，生成任务超时后可恢复。")}
               </p>
-              {["FAILED", "PENDING", "GENERATING"].includes(t.status) && (
+              {["FAILED", "PENDING", "GENERATING", "PAYMENT_PENDING", "PAYMENT_VERIFYING"].includes(t.status) && (
                 <div className="action-row">
                   <Button
-                    disabled={
-                      busy ||
-                      (t.status === "GENERATING" && t.leaseUntil > Date.now())
-                    }
+                    disabled={busy || operationPending}
                     onClick={() => action("retry")}
                   >
-                    <RefreshCw size={16} /> 重试 / 恢复生成
+                    <RefreshCw size={16} /> {awaitingPayment || verifyingPayment ? "重试核对训练次数" : "重试 / 恢复生成"}
                   </Button>
+                  {awaitingPayment && <a className="button secondary" href="#/shop" target="_blank" rel="noopener noreferrer">查看训练包</a>}
+                  {canRefundCredits && <Button secondary disabled={busy || operationPending}
+                    onClick={() => {
+                      if (window.confirm("确认终止本轮并返还本次训练次数？训练记录会保留。")) void action("refund");
+                    }}>
+                    终止并返还本次次数
+                  </Button>}
                 </div>
               )}
             </div>

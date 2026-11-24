@@ -30,6 +30,7 @@ const child = spawn(
       MODEL_MODE: "demo",
       MODEL_API_KEY: "",
       MODEL_NAME: "",
+      PAYMENT_MODE: "disabled",
       SECURE_COOKIE: "false",
     },
   },

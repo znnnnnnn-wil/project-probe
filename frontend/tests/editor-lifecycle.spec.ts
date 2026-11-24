@@ -35,7 +35,7 @@ test("离开项目页后开始训练的迟到响应不会抢回页面", async ({
         maxTurns: 5,
         turns: [{ id: "turn", question: "请介绍你的实现。", answer: "" }],
       };
-    } else if (path === "/api/projects" || path === "/api/trainings" || path === "/api/practice-history") {
+    } else if (path === "/api/projects" || path === "/api/trainings" || path === "/api/practice-history" || path === "/api/examples/practice-history") {
       json = [];
     } else if (path === "/api/training-overview") {
       json = { items: [] };

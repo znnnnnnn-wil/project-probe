@@ -1,6 +1,6 @@
 import exampleProjects from "../../backend/src/main/resources/example-projects.json" with { type: "json" };
 
-const apiBase = (import.meta.env.VITE_API_BASE?.trim() || "/api").replace(/\/+$/, "");
+const apiBase = (import.meta.env?.VITE_API_BASE?.trim() || "/api").replace(/\/+$/, "");
 
 export function apiUrl(path: string) {
   return new URL(apiBase + path, location.origin);

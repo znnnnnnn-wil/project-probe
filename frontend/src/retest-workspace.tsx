@@ -1,18 +1,20 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { api, go } from "./api";
 import { Button } from "./ui";
 import type { Actions } from "./ui";
 import type { Project, Training, TrainingSummary } from "./types";
 import { TrainingSelect } from "./training-select";
+import { startTraining, TrainingPurchaseLink } from "./training-payment";
+import type { PaymentProvider } from "./training-payment";
 
-export function RetestWorkspace({ training, run, busy }: Actions & { training: Training }) {
+export function RetestWorkspace({ training, run, busy, paymentProvider }: Actions & { training: Training; paymentProvider: PaymentProvider }) {
   const [project, setProject] = useState<Project | null>(null);
   const [rounds, setRounds] = useState<TrainingSummary[]>([]);
-  const [focus, setFocus] = useState("");
+  const focusKey = `retest:focus:${training.id}`;
+  const [focus, setFocus] = useState(() => sessionStorage.getItem(focusKey) || "");
   const [selected, setSelected] = useState<number[]>([]);
   const [preview, setPreview] = useState("");
   const [notice, setNotice] = useState("");
-  const key = useRef(crypto.randomUUID());
   const topics = [...new Set([
     ...(training.report?.findings.map(f => f.topic) || []),
     ...(training.report?.retestTopics || []),
@@ -61,7 +63,10 @@ export function RetestWorkspace({ training, run, busy }: Actions & { training: T
       })}>确认保存到项目材料</Button>
       {preview.length > 12000 && <p role="alert">材料超过12000字，请先在项目中整理。</p>}
     </div>}
-    <TrainingSelect label="本轮复测主题" value={focus} onChange={value => { setFocus(value); key.current = crypto.randomUUID(); }} disabled={busy}
+    <TrainingSelect label="本轮复测主题" value={focus} onChange={value => {
+      setFocus(value);
+      sessionStorage.setItem(focusKey, value);
+    }} disabled={busy}
       options={[{ value: "", label: "请选择一个薄弱点" }, ...topics.map(topic => ({ value: topic, label: topic }))]} />
     <ul>{topics.map(topic => {
       const related = rounds.filter(r => r.focus === topic && r.status !== "REFUNDED");
@@ -71,12 +76,16 @@ export function RetestWorkspace({ training, run, busy }: Actions & { training: T
           {r.status === "COMPLETED" ? "查看复测结果" : "继续复测"}</a></p>)}
       </li>;
     })}</ul>
-    <Button disabled={busy || !focus || !project} onClick={() => run(async () => {
-      const result = await api<Training>("/trainings", "POST", {
-        projectId: training.project.id, parentId: training.id, focus, newRound: true, requestKey: key.current,
-      });
-      go(`/${result.status === "COMPLETED" ? "report" : "trainings"}/${result.id}`);
-    })}>开始所选主题复测</Button>
+    <div className="shop-actions">
+      <Button disabled={busy || !topics.includes(focus) || !project} onClick={() => run(async () => {
+        const projectId = training.project.id;
+        if (!projectId) return;
+        const result = await startTraining({ projectId, parentId: training.id, focus, newRound: true });
+        sessionStorage.removeItem(focusKey);
+        go(`/${result.status === "COMPLETED" ? "report" : "trainings"}/${result.id}`);
+      })}>开始所选主题复测</Button>
+      {paymentProvider !== "disabled" && <TrainingPurchaseLink path={"/report/" + training.id} />}
+    </div>
     <p><a href={"#/projects/" + training.project.id}>查看项目材料</a></p>
     {notice && <p role="status">{notice}</p>}
   </section>;

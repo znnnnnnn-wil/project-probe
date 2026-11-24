@@ -7,15 +7,17 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { api, go, emptyProject } from "./api";
-import type { Project, Training, TrainingSummary } from "./types";
+import type { Project, TrainingSummary } from "./types";
 import { ResumeImport } from "./resume-import";
 import { Button, Loading, PageHead } from "./ui";
 import type { Actions } from "./ui";
 import { useMounted } from "./use-read-scope";
 import "./editor.css";
 import { ProjectFields, mergeLegacyMaterials } from "./project-fields";
+import { startTraining, TrainingPurchaseLink } from "./training-payment";
+import type { PaymentProvider } from "./training-payment";
 
-export function Editor({ id, run, busy }: Actions & { id: string }) {
+export function Editor({ id, run, busy, paymentProvider }: Actions & { id: string; paymentProvider: PaymentProvider }) {
   const mounted = useMounted();
   const [importBusy, setImportBusy] = useState(false);
   busy = busy || importBusy;
@@ -23,7 +25,6 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
   const [loaded, setLoaded] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [history, setHistory] = useState<TrainingSummary[]>([]);
-  const [startKey] = useState(crypto.randomUUID());
   const [draftNotice, setDraftNotice] = useState("");
   const [legacyNotice, setLegacyNotice] = useState(false);
   const resumeTooLong = p.resume.length > 12000;
@@ -97,19 +98,18 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
       setDraftNotice("材料已保存");
     });
   };
-  const startRetest = (parentId: string) =>
+  const start = (parentId?: string) =>
     run(async () => {
-      const t = await api<Training>("/trainings", "POST", {
+      const t = await startTraining({
         projectId: id,
         parentId,
-        requestKey: startKey.slice(0, 16) + "-retest-" + parentId,
       });
       if (mounted.current)
         go((t.status === "COMPLETED" ? "/report/" : "/trainings/") + t.id);
     });
   if (!loaded) return <Loading />;
   const ongoing = history.filter(
-    (t) => !["COMPLETED", "REFUNDED"].includes(t.status),
+    (t) => !["COMPLETED", "REFUNDED", "PAYMENT_PENDING"].includes(t.status),
   );
   const completedDeep = history.filter(
     (t) => t.kind === "DEEP" && t.status === "COMPLETED",
@@ -210,7 +210,17 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
             </div>
           </form>
         </div>
-        {(ongoing.length > 0 || completedDeep.length > 0) && <aside className="training-aside">
+        {(paymentProvider !== "disabled" || ongoing.length > 0 || completedDeep.length > 0) && <aside className="training-aside">
+          {paymentProvider !== "disabled" && <section className="retest-entry">
+            <h3>深挖训练</h3>
+            <p>围绕你的项目连续追问，完成后查看逐题复盘。每新开一轮使用 1 次训练额度。</p>
+            <div className="shop-actions">
+              <Button disabled={busy || dirty || ongoing.some(t => t.kind === "DEEP")} onClick={() => start()}>
+                开始深挖训练
+              </Button>
+              <TrainingPurchaseLink path={"/projects/" + id} />
+            </div>
+          </section>}
           {ongoing.map((t) => (
             <a
               className="resume-row editor-resume"
@@ -248,7 +258,7 @@ export function Editor({ id, run, busy }: Actions & { id: string }) {
                           ? "/report/"
                           : "/trainings/") + entry.trainingId,
                       );
-                    else startRetest(t.id);
+                    else start(t.id);
                   }}
                 >
                   {t.retestEntry?.state === "COMPLETED"

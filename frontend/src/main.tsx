@@ -11,6 +11,7 @@ import { api, ApiError, go } from "./api";
 import { Workspace } from "./workspace";
 import { Loading, Empty, PageBoundary } from "./ui";
 import { syncSessionUser } from "./session-user";
+import type { PaymentProvider } from "./training-payment";
 
 import { createRoot } from "react-dom/client";
 import "./style.css";
@@ -43,8 +44,18 @@ const Interview = lazy(() =>
 const ReportPage = lazy(() =>
   import("./report").then((module) => ({ default: module.ReportPage })),
 );
+const ShopPage = lazy(() => import("./shop").then((module) => ({ default: module.ShopPage })));
+const PaymentReturn = lazy(() => import("./shop").then((module) => ({ default: module.PaymentReturn })));
+const WatchaShop = lazy(() => import("./training-payment").then((module) => ({ default: module.WatchaShop })));
+
+function currentPath() {
+  return location.hash.slice(1) || (location.pathname === "/payment-return" ? "/payment-return" : "/");
+}
+
+const privatePath = /^\/(projects|trainings|report|history|shop|payment-return)(?:\/|\?|$)/;
+
 function App() {
-  const [path, setPath] = useState(location.hash.slice(1) || "/");
+  const [path, setPath] = useState(currentPath);
   const [user, setUser] = useState<{ id: string; username: string } | null>(
     null,
   );
@@ -52,6 +63,9 @@ function App() {
   const [config, setConfig] = useState<{
     modelMode: string;
     modelName?: string;
+    paymentProvider?: PaymentProvider;
+    paymentMode?: string;
+    paymentConfigured?: boolean;
   } | null>(null);
   const [error, setError] = useState("");
   const [serviceError, setServiceError] = useState("");
@@ -62,7 +76,7 @@ function App() {
   useEffect(() => {
     const change = () => {
       ++navigationVersion.current;
-      setPath(location.hash.slice(1) || "/");
+      setPath(currentPath());
       setError("");
       setMenu(false);
       window.scrollTo(0, 0);
@@ -104,6 +118,7 @@ function App() {
     }
   }, []);
   const props = { run, busy };
+  const paymentProvider = config?.paymentProvider ?? "disabled";
   const [route, search] = path.split("?", 2);
   const [, nav, routeId, historyRoundId, exampleRoundId] = route.split("/");
   const projectQuery = new URLSearchParams(search);
@@ -122,9 +137,7 @@ function App() {
       !publicHistory &&
       path !== "/" &&
       path !== "/login" &&
-      /^\/(projects|trainings|report|history)(\/|$)/.test(
-        path,
-      )
+      privatePath.test(path)
     ) {
       sessionStorage.setItem("auth:return", path);
     }
@@ -168,6 +181,11 @@ function App() {
           <a className={nav === "history" ? "selected" : ""} aria-current={nav === "history" ? "page" : undefined} href="#/history">
             训练记录
           </a>
+          {user && paymentProvider !== "disabled" && (
+            <a className={nav === "shop" ? "selected" : ""} aria-current={nav === "shop" ? "page" : undefined} href="#/shop">
+              {paymentProvider === "watcha" ? "训练包" : "训练包与订单"}
+            </a>
+          )}
         </nav>
         <div className="account">
           {user ? (
@@ -235,13 +253,10 @@ function App() {
                   syncSessionUser(u.id);
                   setUser(u);
                   const next =
-                    sessionStorage.getItem("auth:return") || "/projects";
+                    sessionStorage.getItem("auth:return") ||
+                    (location.pathname === "/payment-return" ? "/payment-return" : "/projects");
                   sessionStorage.removeItem("auth:return");
-                  go(
-                    /^\/(projects|trainings|report|history)(\/|$)/.test(next)
-                      ? next
-                      : "/projects",
-                  );
+                  go(privatePath.test(next) ? next : "/projects");
                 }}
               />
             ) : nav === "account" ? <Account {...props} /> : path === "/" || nav === "projects" ? (
@@ -254,12 +269,18 @@ function App() {
               ) : projectQuery.get("interview") === "1" ? (
                 <ProjectInterview key={path} id={routeId} fromHistory={projectQuery.get("from") === "history"} {...props} />
               ) : (
-                <Editor key={path} id={routeId} {...props} />
+                <Editor key={path} id={routeId} paymentProvider={paymentProvider} {...props} />
               )
             ) : nav === "trainings" ? (
               <Interview key={path} id={routeId} {...props} />
             ) : nav === "report" ? (
-              <ReportPage key={path} id={routeId} {...props} />
+              <ReportPage key={path} id={routeId} paymentProvider={paymentProvider} {...props} />
+            ) : nav === "shop" && paymentProvider === "watcha" ? (
+              <WatchaShop {...props} />
+            ) : nav === "shop" && paymentProvider === "legacy" ? (
+              <ShopPage {...props} />
+            ) : nav === "payment-return" && paymentProvider === "legacy" ? (
+              <PaymentReturn {...props} configured={!!config?.paymentConfigured} mode={config?.paymentMode || ""} />
             ) : nav === "history" ? (
               <History signedIn projectId={routeId} roundId={historyRoundId} {...props} />
             ) : (

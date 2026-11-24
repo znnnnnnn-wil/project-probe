@@ -1,0 +1,129 @@
+.shop-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.85fr) minmax(0, 1.15fr);
+  align-items: start;
+  gap: 20px;
+}
+.product-list {
+  display: grid;
+  gap: 20px;
+}
+.shop-page .package-card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+}
+.shop-page .price {
+  font-size: 32px;
+  font-weight: 700;
+}
+.shop-page .price small,
+.shop-page .price span {
+  font-size: 14px;
+}
+.shop-page .package-card ul {
+  padding: 0;
+  list-style: none;
+}
+.shop-page .package-card li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.shop-page .package-card li svg {
+  flex: none;
+  color: var(--blue);
+}
+.shop-page .package-card > small {
+  display: block;
+  margin-top: 8px;
+}
+.shop-page .orders {
+  margin-top: 20px;
+}
+.shop-page .order {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.shop-page .order h3 {
+  margin: 8px 0 6px;
+}
+.shop-page .order h3 span {
+  margin-left: 8px;
+}
+.shop-page .new-order {
+  border-left: 3px solid var(--blue);
+  padding-left: 12px;
+}
+.shop-page .balance > div,
+.shop-actions,
+.order-operations {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.shop-page .balance > div {
+  gap: 24px;
+}
+.shop-page .balance strong {
+  display: block;
+  font-size: 26px;
+}
+.shop-page .balance > a {
+  display: inline-flex;
+  margin-top: 12px;
+  gap: 6px;
+  align-items: center;
+}
+.purchase-context,
+.shop-page .delivery-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  background: var(--blue-100);
+  border-radius: var(--r-md);
+  margin: 0 0 16px;
+}
+.purchase-context > svg,
+.shop-page .delivery-note > svg {
+  flex: none;
+}
+.purchase-context > div {
+  flex: 1;
+}
+.purchase-context small {
+  display: block;
+}
+.shop-page .delivery-note {
+  margin: 20px 0 0;
+}
+.shop-page .delivery-note :last-child {
+  margin-bottom: 0;
+}
+.payment-delivered {
+  margin: 16px 0;
+  padding: 16px 0;
+  border-block: 1px solid var(--line);
+}
+.payment-delivered > svg {
+  color: var(--blue);
+}
+.shop-watcha {
+  max-width: 580px;
+}
+.shop-watcha strong {
+  font-size: 28px;
+}
+@media (max-width: 680px) {
+  .shop-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .purchase-context {
+    flex-wrap: wrap;
+  }
+}

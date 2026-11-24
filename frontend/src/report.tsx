@@ -16,6 +16,7 @@ import { Button, Loading, Empty, PageHead, sourceLabel } from "./ui";
 import type { Actions } from "./ui";
 import { RetestWorkspace } from "./retest-workspace";
 import { EvidenceReview } from "./evidence-review";
+import type { PaymentProvider } from "./training-payment";
 
 function ReportTask({
   training,
@@ -203,7 +204,7 @@ function ReportBody({
     </>
   );
 }
-export function ReportPage({ id, run, busy }: Actions & { id: string }) {
+export function ReportPage({ id, run, busy, paymentProvider }: Actions & { id: string; paymentProvider: PaymentProvider }) {
   const [t, setT] = useState<Training | null>(null);
   useEffect(() => {
     const controller = new AbortController();
@@ -299,7 +300,7 @@ export function ReportPage({ id, run, busy }: Actions & { id: string }) {
             busy={busy}
             onSaved={setT}
           />
-          {t.kind === "DEEP" && <RetestWorkspace training={t} run={run} busy={busy} />}
+          {t.kind === "DEEP" && <RetestWorkspace training={t} run={run} busy={busy} paymentProvider={paymentProvider} />}
           {t.kind === "RETEST" && (
             <section className="panel comparison">
               <h2>前后回答对照</h2>

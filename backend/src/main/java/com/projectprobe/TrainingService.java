@@ -71,6 +71,7 @@ public class TrainingService {
     b.put("createdAt", r.get("created_at"));
     if (r.get("history_key") != null) b.put("historyKey", r.get("history_key"));
     b.remove("packageId");
+    b.put("legacyRefundEligible", legacyBillingEnabled() && !str(r, "package_id").isBlank());
     if ("FAILED".equals(r.get("status")) && str(b, "error").contains("权益"))
       b.put("error", "生成失败，进度已保存，可以重试。");
     if (

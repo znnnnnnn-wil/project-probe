@@ -32,6 +32,8 @@ export class PageBoundary extends React.Component<
 export const statusLabel: Record<string, string> = {
   ACTIVE: "进行中",
   PENDING: "待生成",
+  PAYMENT_PENDING: "等待训练额度",
+  PAYMENT_VERIFYING: "核对训练次数中",
   GENERATING: "生成中",
   FAILED: "可重试",
   COMPLETED: "已完成",
